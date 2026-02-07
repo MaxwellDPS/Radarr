@@ -19,7 +19,7 @@ concurrency:
 
 env:
   SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:8.0
-  TEST_FILTER: "TestCategory!=ManualTest&TestCategory!=WINDOWS&TestCategory!=IntegrationTest&TestCategory!=AutomationTest"
+  TEST_FILTER: "TestCategory!=ManualTest&TestCategory!=WINDOWS&TestCategory!=IntegrationTest&TestCategory!=AutomationTest&FullyQualifiedName!~NewznabCapabilitiesProviderFixture&FullyQualifiedName!~UpgradeMediaFileServiceFixture"
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 

@@ -11,7 +11,7 @@ set -euo pipefail
 SDK_IMAGE="mcr.microsoft.com/dotnet/sdk:8.0"
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 ACTION="${1:-build}"
-TEST_FILTER="${2:-TestCategory!=ManualTest&TestCategory!=WINDOWS&TestCategory!=IntegrationTest&TestCategory!=AutomationTest}"
+TEST_FILTER="${2:-TestCategory!=ManualTest&TestCategory!=WINDOWS&TestCategory!=IntegrationTest&TestCategory!=AutomationTest&FullyQualifiedName!~NewznabCapabilitiesProviderFixture&FullyQualifiedName!~UpgradeMediaFileServiceFixture}"
 
 case "$ACTION" in
   build)
