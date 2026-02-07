@@ -1,7 +1,8 @@
 # -- Backend build --
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS backend-build
 WORKDIR /build
-COPY global.json .
+COPY global.json .editorconfig ./
+COPY Logo/ Logo/
 COPY src/ src/
 RUN dotnet publish src/NzbDrone.Console/Radarr.Console.csproj \
     -c Release \
