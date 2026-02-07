@@ -7,8 +7,9 @@ COPY src/ src/
 RUN dotnet publish src/NzbDrone.Console/Radarr.Console.csproj \
     -c Release \
     -f net8.0 \
+    -r linux-musl-x64 \
     -o /app \
-    -p:SelfContained=false \
+    --self-contained \
     -p:TreatWarningsAsErrors=false
 
 # -- Frontend build --
