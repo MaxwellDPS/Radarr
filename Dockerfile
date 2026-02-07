@@ -5,6 +5,7 @@ COPY global.json .
 COPY src/ src/
 RUN dotnet publish src/NzbDrone.Console/Radarr.Console.csproj \
     -c Release \
+    -f net8.0 \
     -o /app \
     -p:SelfContained=false
 
