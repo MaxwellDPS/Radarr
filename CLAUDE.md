@@ -8,19 +8,22 @@ This is a **fork of Radarr** adding **Seedr.cc API support** as a download clien
 
 ## Build Commands
 
-### Backend
+**Important:** .NET SDK is **not installed locally**. All backend building and testing must be done via Docker.
+
+### Backend (Docker)
 ```bash
-# Clean
-dotnet clean src/Radarr.sln -c Debug
+# Full Docker image build (backend + frontend + runtime)
+docker build -t radarr-custom .
 
-# Build (macOS/Linux)
-dotnet msbuild -restore src/Radarr.sln -p:Configuration=Debug -p:Platform=Posix -t:PublishAllRids
+# Build only the backend stage
+docker build --target backend-build -t radarr-backend .
 
-# Build (Windows)
-dotnet msbuild -restore src/Radarr.sln -p:Configuration=Debug -p:Platform=Windows -t:PublishAllRids
+# Run a one-off dotnet command using the SDK image
+docker run --rm -v "$(pwd)":/build -w /build mcr.microsoft.com/dotnet/sdk:8.0-alpine \
+  dotnet build src/Radarr.sln -c Debug
 
-# Run from output
-./_output/net8.0/<runtime>/publish/Radarr
+# Run the built image
+docker run -p 7878:7878 radarr-custom
 ```
 
 ### Frontend
@@ -45,17 +48,15 @@ yarn stylelint-linux --fix   # CSS lint (Linux/macOS)
 yarn stylelint-windows --fix # CSS lint (Windows)
 ```
 
-### Tests
+### Tests (Docker)
 ```bash
-# Via build script
-./test.sh <PLATFORM> <TYPE> <COVERAGE>
-# Examples:
-./test.sh Linux Unit Test
-./test.sh Windows Integration Test
-./test.sh Linux Unit Coverage
+# Run unit tests via Docker
+docker run --rm -v "$(pwd)":/build -w /build mcr.microsoft.com/dotnet/sdk:8.0-alpine \
+  dotnet test src/Radarr.sln --filter "TestCategory!=IntegrationTest&TestCategory!=ManualTest&TestCategory!=AutomationTest"
 
-# Via dotnet directly (run a single test DLL)
-dotnet test _tests/net8.0/Radarr.Core.Test.dll --filter "FullyQualifiedName~ClassName"
+# Run a specific test class
+docker run --rm -v "$(pwd)":/build -w /build mcr.microsoft.com/dotnet/sdk:8.0-alpine \
+  dotnet test src/Radarr.sln --filter "FullyQualifiedName~ClassName"
 ```
 
 Test framework: **NUnit 3** with Moq and FluentAssertions. Test categories: `ManualTest`, `IntegrationTest`, `AutomationTest`.

@@ -139,7 +139,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                     var safeFolderName = Path.GetFileName(folder.Name);
                     var localPath = Path.Combine(Settings.DownloadDirectory, safeFolderName);
 
-                    if (mapping.LocalDownloadComplete || _diskProvider.FolderExists(localPath))
+                    if (mapping.LocalDownloadComplete || (!mapping.LocalDownloadInProgress && _diskProvider.FolderExists(localPath)))
                     {
                         mapping.LocalDownloadComplete = true;
                         mapping.LocalDownloadFailed = false;
@@ -208,7 +208,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                     var safeFileName = Path.GetFileName(file.Name);
                     var localPath = Path.Combine(Settings.DownloadDirectory, safeFileName);
 
-                    if (mapping.LocalDownloadComplete || _diskProvider.FileExists(localPath))
+                    if (mapping.LocalDownloadComplete || (!mapping.LocalDownloadInProgress && _diskProvider.FileExists(localPath)))
                     {
                         mapping.LocalDownloadComplete = true;
                         mapping.LocalDownloadFailed = false;
