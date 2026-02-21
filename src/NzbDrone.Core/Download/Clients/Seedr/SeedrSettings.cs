@@ -9,7 +9,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
     {
         public SeedrSettingsValidator()
         {
-            RuleFor(c => c.Email).NotEmpty();
+            RuleFor(c => c.Email).NotEmpty().EmailAddress();
             RuleFor(c => c.Password).NotEmpty();
             RuleFor(c => c.DownloadDirectory).IsValidPath();
         }

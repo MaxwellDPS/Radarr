@@ -27,6 +27,7 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Check out
         uses: actions/checkout@v5
@@ -43,6 +44,7 @@ jobs:
     name: Unit Tests
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Check out
         uses: actions/checkout@v5
@@ -53,12 +55,18 @@ jobs:
             -v "${{ github.workspace }}:/src" \
             -w /src \
             ${{ env.SDK_IMAGE }} \
-            bash -c "dotnet build src/Radarr.sln -warnaserror /m:1 && dotnet test _tests/net8.0/Radarr.Core.Test.dll --filter \"${{ env.TEST_FILTER }}\""
+            bash -c "dotnet build src/Radarr.sln -warnaserror /m:1 && \
+              dotnet test _tests/net8.0/Radarr.Core.Test.dll --filter \"${{ env.TEST_FILTER }}\" && \
+              dotnet test _tests/net8.0/Radarr.Api.Test.dll --filter \"${{ env.TEST_FILTER }}\" && \
+              dotnet test _tests/net8.0/Radarr.Common.Test.dll --filter \"${{ env.TEST_FILTER }}\" && \
+              dotnet test _tests/net8.0/Radarr.Host.Test.dll --filter \"${{ env.TEST_FILTER }}\" && \
+              dotnet test _tests/net8.0/Radarr.Libraries.Test.dll --filter \"${{ env.TEST_FILTER }}\""
 
   docker:
     name: Build Docker Image
     needs: [build, test]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write

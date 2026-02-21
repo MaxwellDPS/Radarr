@@ -72,6 +72,12 @@ namespace NzbDrone.Core.Download.Clients.Seedr
         public override IEnumerable<DownloadClientItem> GetItems()
         {
             var contents = _proxy.GetFolderContents(null, Settings);
+
+            if (contents == null)
+            {
+                return Enumerable.Empty<DownloadClientItem>();
+            }
+
             var items = new List<DownloadClientItem>();
             var cachedMappings = _downloadCache.Values.ToList();
 
@@ -86,7 +92,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                     var infoHash = mapping?.InfoHash ?? transfer.Hash?.ToUpper() ?? $"seedr-{transfer.Id}";
 
                     // Update cache with transfer info if we have a hash from the transfer
-                    if (mapping == null && transfer.Hash.IsNotNullOrWhiteSpace())
+                    if (mapping == null && !string.IsNullOrWhiteSpace(transfer.Hash))
                     {
                         mapping = new SeedrDownloadMapping
                         {
@@ -131,11 +137,13 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                     mapping.FolderId = folder.Id;
                     _downloadCache.Set(mapping.InfoHash, mapping);
 
-                    var localPath = Path.Combine(Settings.DownloadDirectory, folder.Name);
+                    var safeFolderName = Path.GetFileName(folder.Name);
+                    var localPath = Path.Combine(Settings.DownloadDirectory, safeFolderName);
 
                     if (mapping.LocalDownloadComplete || _diskProvider.FolderExists(localPath))
                     {
                         mapping.LocalDownloadComplete = true;
+                        mapping.LocalDownloadFailed = false;
                         _downloadCache.Set(mapping.InfoHash, mapping);
 
                         items.Add(new DownloadClientItem
@@ -148,6 +156,21 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                             Status = DownloadItemStatus.Completed,
                             OutputPath = new OsPath(localPath),
                             CanMoveFiles = true,
+                            CanBeRemoved = true
+                        });
+                    }
+                    else if (mapping.LocalDownloadFailed)
+                    {
+                        items.Add(new DownloadClientItem
+                        {
+                            DownloadClientInfo = DownloadClientItemClientInfo.FromDownloadClient(this, false),
+                            DownloadId = mapping.InfoHash,
+                            Title = folder.Name,
+                            TotalSize = folder.Size,
+                            RemainingSize = folder.Size,
+                            Status = DownloadItemStatus.Warning,
+                            Message = "Failed to download from Seedr cloud. Remove and re-add to retry.",
+                            CanMoveFiles = false,
                             CanBeRemoved = true
                         });
                     }
@@ -183,11 +206,13 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                         continue;
                     }
 
-                    var localPath = Path.Combine(Settings.DownloadDirectory, file.Name);
+                    var safeFileName = Path.GetFileName(file.Name);
+                    var localPath = Path.Combine(Settings.DownloadDirectory, safeFileName);
 
                     if (mapping.LocalDownloadComplete || _diskProvider.FileExists(localPath))
                     {
                         mapping.LocalDownloadComplete = true;
+                        mapping.LocalDownloadFailed = false;
                         _downloadCache.Set(mapping.InfoHash, mapping);
 
                         items.Add(new DownloadClientItem
@@ -200,6 +225,21 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                             Status = DownloadItemStatus.Completed,
                             OutputPath = new OsPath(localPath),
                             CanMoveFiles = true,
+                            CanBeRemoved = true
+                        });
+                    }
+                    else if (mapping.LocalDownloadFailed)
+                    {
+                        items.Add(new DownloadClientItem
+                        {
+                            DownloadClientInfo = DownloadClientItemClientInfo.FromDownloadClient(this, false),
+                            DownloadId = mapping.InfoHash,
+                            Title = file.Name,
+                            TotalSize = file.Size,
+                            RemainingSize = file.Size,
+                            Status = DownloadItemStatus.Warning,
+                            Message = "Failed to download from Seedr cloud. Remove and re-add to retry.",
+                            CanMoveFiles = false,
                             CanBeRemoved = true
                         });
                     }
@@ -230,13 +270,20 @@ namespace NzbDrone.Core.Download.Clients.Seedr
         {
             var mapping = _downloadCache.Find(item.DownloadId);
 
-            if (mapping?.FolderId != null)
+            try
             {
-                _proxy.DeleteFolder(mapping.FolderId.Value, Settings);
+                if (mapping?.FolderId != null)
+                {
+                    _proxy.DeleteFolder(mapping.FolderId.Value, Settings);
+                }
+                else if (mapping?.TransferId != null)
+                {
+                    _proxy.DeleteTransfer(mapping.TransferId.Value, Settings);
+                }
             }
-            else if (mapping?.TransferId != null)
+            catch (Exception ex)
             {
-                _proxy.DeleteTransfer(mapping.TransferId.Value, Settings);
+                _logger.Warn(ex, "Failed to remove item from Seedr cloud, removing from cache anyway");
             }
 
             if (deleteData)
@@ -251,7 +298,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
         {
             return new DownloadClientInfo
             {
-                IsLocalhost = true,
+                IsLocalhost = false,
                 OutputRootFolders = new List<OsPath> { new OsPath(Settings.DownloadDirectory) }
             };
         }
@@ -314,33 +361,51 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             _downloadCache.Set(mapping.InfoHash, mapping);
 
             var settings = Settings;
+            var infoHash = mapping.InfoHash;
 
             Task.Run(() =>
             {
                 try
                 {
                     var folderContents = _proxy.GetFolderContents(folder.Id, settings);
-                    var localDir = Path.Combine(settings.DownloadDirectory, folder.Name);
+                    var safeFolderName = Path.GetFileName(folder.Name);
+                    var localDir = Path.Combine(settings.DownloadDirectory, safeFolderName);
 
                     _diskProvider.CreateFolder(localDir);
 
-                    foreach (var file in folderContents.Files)
+                    if (folderContents.Files != null)
                     {
-                        var response = _proxy.DownloadFile(file.Id, settings);
-                        var filePath = Path.Combine(localDir, file.Name);
+                        foreach (var file in folderContents.Files)
+                        {
+                            var safeFileName = Path.GetFileName(file.Name);
+                            var filePath = Path.Combine(localDir, safeFileName);
 
-                        File.WriteAllBytes(filePath, response.ResponseData);
+                            _proxy.DownloadFileToPath(file.Id, filePath, settings);
+                        }
                     }
 
-                    mapping.LocalDownloadComplete = true;
-                    mapping.LocalDownloadInProgress = false;
-                    _downloadCache.Set(mapping.InfoHash, mapping);
+                    var currentMapping = _downloadCache.Find(infoHash);
+
+                    if (currentMapping != null)
+                    {
+                        currentMapping.LocalDownloadComplete = true;
+                        currentMapping.LocalDownloadInProgress = false;
+                        currentMapping.LocalDownloadFailed = false;
+                        _downloadCache.Set(infoHash, currentMapping);
+                    }
                 }
                 catch (Exception ex)
                 {
                     _logger.Error(ex, "Failed to download folder '{0}' from Seedr cloud", folder.Name);
-                    mapping.LocalDownloadInProgress = false;
-                    _downloadCache.Set(mapping.InfoHash, mapping);
+
+                    var currentMapping = _downloadCache.Find(infoHash);
+
+                    if (currentMapping != null)
+                    {
+                        currentMapping.LocalDownloadInProgress = false;
+                        currentMapping.LocalDownloadFailed = true;
+                        _downloadCache.Set(infoHash, currentMapping);
+                    }
                 }
             });
         }
@@ -356,25 +421,39 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             _downloadCache.Set(mapping.InfoHash, mapping);
 
             var settings = Settings;
+            var infoHash = mapping.InfoHash;
 
             Task.Run(() =>
             {
                 try
                 {
-                    var response = _proxy.DownloadFile(file.Id, settings);
-                    var filePath = Path.Combine(settings.DownloadDirectory, file.Name);
+                    var safeFileName = Path.GetFileName(file.Name);
+                    var filePath = Path.Combine(settings.DownloadDirectory, safeFileName);
 
-                    File.WriteAllBytes(filePath, response.ResponseData);
+                    _proxy.DownloadFileToPath(file.Id, filePath, settings);
 
-                    mapping.LocalDownloadComplete = true;
-                    mapping.LocalDownloadInProgress = false;
-                    _downloadCache.Set(mapping.InfoHash, mapping);
+                    var currentMapping = _downloadCache.Find(infoHash);
+
+                    if (currentMapping != null)
+                    {
+                        currentMapping.LocalDownloadComplete = true;
+                        currentMapping.LocalDownloadInProgress = false;
+                        currentMapping.LocalDownloadFailed = false;
+                        _downloadCache.Set(infoHash, currentMapping);
+                    }
                 }
                 catch (Exception ex)
                 {
                     _logger.Error(ex, "Failed to download file '{0}' from Seedr cloud", file.Name);
-                    mapping.LocalDownloadInProgress = false;
-                    _downloadCache.Set(mapping.InfoHash, mapping);
+
+                    var currentMapping = _downloadCache.Find(infoHash);
+
+                    if (currentMapping != null)
+                    {
+                        currentMapping.LocalDownloadInProgress = false;
+                        currentMapping.LocalDownloadFailed = true;
+                        _downloadCache.Set(infoHash, currentMapping);
+                    }
                 }
             });
         }
@@ -387,6 +466,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             public string Name { get; set; }
             public bool LocalDownloadComplete { get; set; }
             public bool LocalDownloadInProgress { get; set; }
+            public bool LocalDownloadFailed { get; set; }
         }
     }
 }

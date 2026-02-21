@@ -1,0 +1,13 @@
+.git
+.github
+.vs
+.vscode
+node_modules
+_output
+_tests
+_artifacts
+CoverageResults
+TestResult.xml
+*.user
+*.suo
+**/*.log

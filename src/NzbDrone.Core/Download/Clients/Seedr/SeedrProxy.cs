@@ -1,5 +1,8 @@
+using System;
+using System.IO;
 using System.Net;
 using NLog;
+using NzbDrone.Common.Extensions;
 using NzbDrone.Common.Http;
 using NzbDrone.Common.Serializer;
 
@@ -14,7 +17,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
         void DeleteFolder(long folderId, SeedrSettings settings);
         void DeleteFile(long fileId, SeedrSettings settings);
         SeedrUser GetUser(SeedrSettings settings);
-        HttpResponse DownloadFile(long fileId, SeedrSettings settings);
+        void DownloadFileToPath(long fileId, string filePath, SeedrSettings settings);
     }
 
     public class SeedrProxy : ISeedrProxy
@@ -32,7 +35,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
         {
             var requestBuilder = new HttpRequestBuilder("https://www.seedr.cc/rest")
             {
-                LogResponseContent = true,
+                LogResponseContent = false,
                 NetworkCredential = new BasicNetworkCredential(settings.Email, settings.Password)
             };
 
@@ -49,8 +52,8 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             }
             catch (HttpException ex)
             {
-                if (ex.Response.StatusCode == HttpStatusCode.Forbidden ||
-                    ex.Response.StatusCode == HttpStatusCode.Unauthorized)
+                if (ex.Response?.StatusCode == HttpStatusCode.Forbidden ||
+                    ex.Response?.StatusCode == HttpStatusCode.Unauthorized)
                 {
                     throw new DownloadClientAuthenticationException("Failed to authenticate with Seedr.");
                 }
@@ -72,7 +75,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             var resource = folderId.HasValue ? $"/folder/{folderId.Value}" : "/folder";
             var request = BuildRequest(settings).Resource(resource).Build();
 
-            return Json.Deserialize<SeedrFolderContents>(HandleRequest(request).Content);
+            return DeserializeResponse<SeedrFolderContents>(HandleRequest(request));
         }
 
         public SeedrTransfer AddMagnet(string magnetLink, SeedrSettings settings)
@@ -83,7 +86,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                 .AddFormParameter("magnet", magnetLink)
                 .Build();
 
-            return Json.Deserialize<SeedrTransfer>(HandleRequest(request).Content);
+            return DeserializeResponse<SeedrTransfer>(HandleRequest(request));
         }
 
         public SeedrTransfer AddTorrentFile(string filename, byte[] fileContent, SeedrSettings settings)
@@ -94,7 +97,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                 .AddFormUpload("file", filename, fileContent, "application/x-bittorrent")
                 .Build();
 
-            return Json.Deserialize<SeedrTransfer>(HandleRequest(request).Content);
+            return DeserializeResponse<SeedrTransfer>(HandleRequest(request));
         }
 
         public void DeleteTransfer(long transferId, SeedrSettings settings)
@@ -125,16 +128,50 @@ namespace NzbDrone.Core.Download.Clients.Seedr
         {
             var request = BuildRequest(settings).Resource("/user").Build();
 
-            return Json.Deserialize<SeedrUser>(HandleRequest(request).Content);
+            return DeserializeResponse<SeedrUser>(HandleRequest(request));
         }
 
-        public HttpResponse DownloadFile(long fileId, SeedrSettings settings)
+        private T DeserializeResponse<T>(HttpResponse response)
+        {
+            if (response.Content.IsNullOrWhiteSpace())
+            {
+                throw new DownloadClientException("Seedr API returned an empty response");
+            }
+
+            return Json.Deserialize<T>(response.Content);
+        }
+
+        public void DownloadFileToPath(long fileId, string filePath, SeedrSettings settings)
         {
             var requestBuilder = BuildRequest(settings);
             requestBuilder.AllowAutoRedirect = true;
             var request = requestBuilder.Resource($"/file/{fileId}").Build();
+            request.RequestTimeout = TimeSpan.FromMinutes(30);
 
-            return HandleRequest(request);
+            var filePartPath = filePath + ".part";
+
+            try
+            {
+                using (var fileStream = new FileStream(filePartPath, FileMode.Create, FileAccess.Write))
+                {
+                    request.ResponseStream = fileStream;
+                    HandleRequest(request);
+                }
+
+                if (File.Exists(filePath))
+                {
+                    File.Delete(filePath);
+                }
+
+                File.Move(filePartPath, filePath);
+            }
+            finally
+            {
+                if (File.Exists(filePartPath))
+                {
+                    File.Delete(filePartPath);
+                }
+            }
         }
     }
 }

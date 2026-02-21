@@ -1,5 +1,5 @@
 # -- Backend build --
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS backend-build
+FROM mcr.microsoft.com/dotnet/sdk:8.0-alpine AS backend-build
 WORKDIR /build
 COPY global.json .editorconfig ./
 COPY Logo/ Logo/
@@ -22,12 +22,14 @@ COPY tsconfig.json ./
 RUN yarn build --env production
 
 # -- Runtime image --
-FROM lscr.io/linuxserver/radarr:latest
+# Pin to a specific version tag to avoid supply chain risk from :latest
+FROM lscr.io/linuxserver/radarr:5.21.1
 
 # Replace Radarr binaries with our build
 RUN rm -rf /app/radarr/bin
 COPY --from=backend-build /app /app/radarr/bin
 COPY --from=frontend-build /build/_output/UI /app/radarr/bin/UI
+RUN chmod +x /app/radarr/bin/Radarr /app/radarr/bin/Radarr.Update /app/radarr/bin/ffprobe
 
 # Update package info to reflect custom build
 RUN echo -e "UpdateMethod=docker\nBranch=develop\nPackageVersion=custom\nPackageAuthor=custom-build" > /app/radarr/package_info

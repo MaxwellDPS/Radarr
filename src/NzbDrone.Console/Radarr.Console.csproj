@@ -10,5 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\NzbDrone.Host\Radarr.Host.csproj" />
+    <ProjectReference Include="..\NzbDrone.Mono\Radarr.Mono.csproj" Condition="!$(RuntimeIdentifier.StartsWith('win'))" />
+    <ProjectReference Include="..\NzbDrone.Windows\Radarr.Windows.csproj" Condition="$(RuntimeIdentifier.StartsWith('win'))" />
   </ItemGroup>
 </Project>
