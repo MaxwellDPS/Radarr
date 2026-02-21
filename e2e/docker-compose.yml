@@ -1,0 +1,30 @@
+services:
+  radarr:
+    build:
+      context: ..
+      dockerfile: e2e/Dockerfile
+      args:
+        # Auto-detected: linux-musl-arm64 on ARM, linux-musl-x64 on x86_64
+        DOTNET_RID: ${DOTNET_RID:-linux-musl-arm64}
+    ports:
+      - "7878:7878"
+    volumes:
+      - radarr-config:/config
+      - radarr-downloads:/downloads
+      - radarr-movies:/movies
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    environment:
+      - TZ=Etc/UTC
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7878/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+volumes:
+  radarr-config:
+  radarr-downloads:
+  radarr-movies:

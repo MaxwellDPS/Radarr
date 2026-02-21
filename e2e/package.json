@@ -1,0 +1,16 @@
+{
+  "name": "radarr-e2e",
+  "private": true,
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "cleanup:docker": "docker compose down -v",
+    "cleanup:seedr": "npx tsx helpers/seedr-cleanup.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0",
+"fast-xml-parser": "^4.5.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.0"
+  }
+}
