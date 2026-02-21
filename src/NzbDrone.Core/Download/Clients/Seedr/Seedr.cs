@@ -11,6 +11,7 @@ using NzbDrone.Common.Extensions;
 using NzbDrone.Common.Http;
 using NzbDrone.Core.Blocklisting;
 using NzbDrone.Core.Configuration;
+using NzbDrone.Core.Download.History;
 using NzbDrone.Core.Localization;
 using NzbDrone.Core.MediaFiles.TorrentInfo;
 using NzbDrone.Core.Parser.Model;
@@ -19,12 +20,15 @@ using NzbDrone.Core.Validation;
 
 namespace NzbDrone.Core.Download.Clients.Seedr
 {
-    public class Seedr : TorrentClientBase<SeedrSettings>
+    public class Seedr : TorrentClientBase<SeedrSettings>, IProvideGrabMetadata
     {
         private readonly ISeedrProxy _proxy;
+        private readonly IDownloadHistoryService _downloadHistoryService;
         private readonly ICached<SeedrDownloadMapping> _downloadCache;
+        private bool _cacheRecovered;
 
         public Seedr(ISeedrProxy proxy,
+                     IDownloadHistoryService downloadHistoryService,
                      ICacheManager cacheManager,
                      ITorrentFileInfoReader torrentFileInfoReader,
                      IHttpClient httpClient,
@@ -37,10 +41,33 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             : base(torrentFileInfoReader, httpClient, configService, diskProvider, remotePathMappingService, localizationService, blocklistService, logger)
         {
             _proxy = proxy;
+            _downloadHistoryService = downloadHistoryService;
             _downloadCache = cacheManager.GetCache<SeedrDownloadMapping>(GetType());
         }
 
         public override string Name => "Seedr";
+
+        public Dictionary<string, string> GetGrabMetadata(string downloadId)
+        {
+            var mapping = _downloadCache.Find(downloadId);
+
+            if (mapping == null)
+            {
+                return null;
+            }
+
+            var metadata = new Dictionary<string, string>
+            {
+                { "SeedrName", mapping.Name }
+            };
+
+            if (mapping.TransferId.HasValue)
+            {
+                metadata["SeedrTransferId"] = mapping.TransferId.Value.ToString();
+            }
+
+            return metadata;
+        }
 
         protected override string AddFromMagnetLink(RemoteMovie remoteMovie, string hash, string magnetLink)
         {
@@ -72,6 +99,11 @@ namespace NzbDrone.Core.Download.Clients.Seedr
 
         public override IEnumerable<DownloadClientItem> GetItems()
         {
+            if (!_cacheRecovered && !_downloadCache.Values.Any())
+            {
+                RecoverCacheFromHistory();
+            }
+
             var contents = _proxy.GetFolderContents(null, Settings);
 
             // R4: Add warning log when API returns null
@@ -84,7 +116,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             var items = new List<DownloadClientItem>();
             var cachedMappings = _downloadCache.Values.ToList();
 
-            _logger.Debug("Seedr folder contents: {0} transfers, {1} folders, {2} files, {3} cached mappings",
+            _logger.Info("Seedr folder contents: {0} transfers, {1} folders, {2} files, {3} cached mappings",
                 contents.Transfers?.Count ?? 0,
                 contents.Folders?.Count ?? 0,
                 contents.Files?.Count ?? 0,
@@ -139,7 +171,15 @@ namespace NzbDrone.Core.Download.Clients.Seedr
 
                     if (mapping == null)
                     {
-                        continue;
+                        mapping = TryMatchOrphanedItem(folder.Name);
+
+                        if (mapping == null)
+                        {
+                            _logger.Warn("Seedr folder '{0}' (ID: {1}) has no cached mapping and could not be matched to history. Skipping.", folder.Name, folder.Id);
+                            continue;
+                        }
+
+                        _logger.Info("Seedr folder '{0}' matched to history entry with hash {1}", folder.Name, mapping.InfoHash);
                     }
 
                     // Update cache with folder ID
@@ -213,7 +253,15 @@ namespace NzbDrone.Core.Download.Clients.Seedr
 
                     if (mapping == null)
                     {
-                        continue;
+                        mapping = TryMatchOrphanedItem(file.Name);
+
+                        if (mapping == null)
+                        {
+                            _logger.Warn("Seedr file '{0}' (ID: {1}) has no cached mapping and could not be matched to history. Skipping.", file.Name, file.Id);
+                            continue;
+                        }
+
+                        _logger.Info("Seedr file '{0}' matched to history entry with hash {1}", file.Name, mapping.InfoHash);
                     }
 
                     // 3.1: Update cache with file ID
@@ -396,6 +444,99 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             }
         }
 
+        private void RecoverCacheFromHistory()
+        {
+            _cacheRecovered = true;
+
+            try
+            {
+                var grabbedHistory = _downloadHistoryService.GetGrabbedItemsByDownloadClient(Definition.Id);
+
+                if (grabbedHistory == null || !grabbedHistory.Any())
+                {
+                    _logger.Info("Seedr cache recovery: no grab history found for this client instance");
+                    return;
+                }
+
+                var recovered = 0;
+
+                foreach (var historyItem in grabbedHistory)
+                {
+                    if (_downloadCache.Find(historyItem.DownloadId) != null)
+                    {
+                        continue;
+                    }
+
+                    if (_downloadHistoryService.DownloadAlreadyImported(historyItem.DownloadId))
+                    {
+                        continue;
+                    }
+
+                    var mapping = new SeedrDownloadMapping
+                    {
+                        InfoHash = historyItem.DownloadId,
+                        Name = historyItem.Data.ContainsKey("SeedrName") ? historyItem.Data["SeedrName"] : historyItem.SourceTitle
+                    };
+
+                    if (historyItem.Data.ContainsKey("SeedrTransferId") && long.TryParse(historyItem.Data["SeedrTransferId"], out var transferId))
+                    {
+                        mapping.TransferId = transferId;
+                    }
+
+                    _downloadCache.Set(mapping.InfoHash, mapping);
+                    recovered++;
+                }
+
+                _logger.Info("Seedr cache recovery: restored {0} mappings from download history", recovered);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn(ex, "Seedr cache recovery failed, items may not appear in Activity until re-grabbed");
+            }
+        }
+
+        private SeedrDownloadMapping TryMatchOrphanedItem(string itemName)
+        {
+            try
+            {
+                var grabbedHistory = _downloadHistoryService.GetGrabbedItemsByDownloadClient(Definition.Id);
+
+                foreach (var historyItem in grabbedHistory)
+                {
+                    if (_downloadHistoryService.DownloadAlreadyImported(historyItem.DownloadId))
+                    {
+                        continue;
+                    }
+
+                    var seedrName = historyItem.Data.ContainsKey("SeedrName") ? historyItem.Data["SeedrName"] : historyItem.SourceTitle;
+
+                    if (itemName.Contains(seedrName, StringComparison.OrdinalIgnoreCase) ||
+                        seedrName.Contains(itemName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var mapping = new SeedrDownloadMapping
+                        {
+                            InfoHash = historyItem.DownloadId,
+                            Name = seedrName
+                        };
+
+                        if (historyItem.Data.ContainsKey("SeedrTransferId") && long.TryParse(historyItem.Data["SeedrTransferId"], out var transferId))
+                        {
+                            mapping.TransferId = transferId;
+                        }
+
+                        _downloadCache.Set(mapping.InfoHash, mapping);
+                        return mapping;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug(ex, "Failed to match orphaned Seedr item '{0}' against history", itemName);
+            }
+
+            return null;
+        }
+
         // 3.2: Recurse subfolders. R1: Use SanitizeFileName helper.
         private void DownloadFolderFromCloud(SeedrSubFolder folder, SeedrDownloadMapping mapping)
         {
@@ -409,6 +550,8 @@ namespace NzbDrone.Core.Download.Clients.Seedr
 
             var settings = Settings;
             var infoHash = mapping.InfoHash;
+
+            _logger.Info("Starting cloud-to-local download for Seedr folder '{0}' (hash: {1})", folder.Name, infoHash);
 
             Task.Run(() =>
             {
@@ -428,6 +571,8 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                         currentMapping.LocalDownloadFailed = false;
                         _downloadCache.Set(infoHash, currentMapping);
                     }
+
+                    _logger.Info("Completed cloud-to-local download for Seedr folder '{0}'", folder.Name);
                 }
                 catch (Exception ex)
                 {
@@ -459,6 +604,8 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             var settings = Settings;
             var infoHash = mapping.InfoHash;
 
+            _logger.Info("Starting cloud-to-local download for Seedr file '{0}' (hash: {1})", file.Name, infoHash);
+
             Task.Run(() =>
             {
                 try
@@ -476,6 +623,8 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                         currentMapping.LocalDownloadFailed = false;
                         _downloadCache.Set(infoHash, currentMapping);
                     }
+
+                    _logger.Info("Completed cloud-to-local download for Seedr file '{0}'", file.Name);
                 }
                 catch (Exception ex)
                 {

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using NzbDrone.Common.Extensions;
 using NzbDrone.Core.History;
@@ -13,6 +14,7 @@ namespace NzbDrone.Core.Download.History
         bool DownloadAlreadyImported(string downloadId);
         DownloadHistory GetLatestDownloadHistoryItem(string downloadId);
         DownloadHistory GetLatestGrab(string downloadId);
+        List<DownloadHistory> GetGrabbedItemsByDownloadClient(int downloadClientId);
     }
 
     public class DownloadHistoryService : IDownloadHistoryService,
@@ -91,6 +93,11 @@ namespace NzbDrone.Core.Download.History
                               .FirstOrDefault(d => d.EventType == DownloadHistoryEventType.DownloadGrabbed);
         }
 
+        public List<DownloadHistory> GetGrabbedItemsByDownloadClient(int downloadClientId)
+        {
+            return _repository.FindGrabbedByDownloadClientId(downloadClientId);
+        }
+
         public void Handle(MovieGrabbedEvent message)
         {
             // Don't store grabbed events for clients that don't download IDs
@@ -117,6 +124,15 @@ namespace NzbDrone.Core.Download.History
             history.Data.Add("DownloadClientName", message.DownloadClientName);
 
             history.Data.Add("CustomFormatScore", message.Movie.CustomFormatScore.ToString());
+
+            if (message.CustomData != null)
+            {
+                foreach (var kvp in message.CustomData)
+                {
+                    history.Data[kvp.Key] = kvp.Value;
+                }
+            }
+
             _repository.Insert(history);
         }
 

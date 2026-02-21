@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using NzbDrone.Common.Messaging;
 using NzbDrone.Core.Parser.Model;
 
@@ -10,6 +11,7 @@ namespace NzbDrone.Core.Download
         public string DownloadClient { get; set; }
         public string DownloadClientName { get; set; }
         public string DownloadId { get; set; }
+        public Dictionary<string, string> CustomData { get; set; }
 
         public MovieGrabbedEvent(RemoteMovie movie)
         {
