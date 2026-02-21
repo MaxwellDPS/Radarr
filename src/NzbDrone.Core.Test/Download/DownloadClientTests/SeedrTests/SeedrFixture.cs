@@ -598,7 +598,7 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.SeedrTests
 
             var result = Subject.Test();
 
-            result.Errors.Should().ContainSingle(e => e is NzbDrone.Core.Validation.NzbDroneValidationFailure f && f.IsWarning);
+            result.Errors.Should().ContainSingle(e => e.GetType() == typeof(NzbDrone.Core.Validation.NzbDroneValidationFailure) && ((NzbDrone.Core.Validation.NzbDroneValidationFailure)e).IsWarning);
         }
 
         [Test]
