@@ -15,8 +15,5 @@ namespace NzbDrone.Core.Download.Clients.Seedr
 
         [JsonProperty("space_max")]
         public long SpaceMax { get; set; }
-
-        [JsonProperty("is_premium")]
-        public bool IsPremium { get; set; }
     }
 }

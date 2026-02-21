@@ -3,12 +3,14 @@ name: Docker Build
 on:
   push:
     branches:
-      - develop
+      - main
+    tags:
+      - "v*"
     paths-ignore:
       - "src/Radarr.Api.*/openapi.json"
   pull_request:
     branches:
-      - develop
+      - main
     paths-ignore:
       - "src/NzbDrone.Core/Localization/Core/**"
       - "src/Radarr.Api.*/openapi.json"
@@ -91,6 +93,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
             type=ref,event=branch
             type=ref,event=pr
             type=sha,prefix=

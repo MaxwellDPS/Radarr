@@ -25,11 +25,14 @@ RUN yarn build --env production
 # Pin to a specific version tag to avoid supply chain risk from :latest
 FROM lscr.io/linuxserver/radarr:5.21.1
 
+# Preserve ffprobe from the base image before replacing binaries
+RUN cp /app/radarr/bin/ffprobe /tmp/ffprobe
+
 # Replace Radarr binaries with our build
 RUN rm -rf /app/radarr/bin
 COPY --from=backend-build /app /app/radarr/bin
 COPY --from=frontend-build /build/_output/UI /app/radarr/bin/UI
-RUN chmod +x /app/radarr/bin/Radarr /app/radarr/bin/Radarr.Update /app/radarr/bin/ffprobe
+RUN cp /tmp/ffprobe /app/radarr/bin/ffprobe && chmod +x /app/radarr/bin/ffprobe
 
 # Update package info to reflect custom build
 RUN echo -e "UpdateMethod=docker\nBranch=develop\nPackageVersion=custom\nPackageAuthor=custom-build" > /app/radarr/package_info

@@ -7,7 +7,6 @@ using FluentValidation.Results;
 using NLog;
 using NzbDrone.Common.Cache;
 using NzbDrone.Common.Disk;
-using NzbDrone.Common.Extensions;
 using NzbDrone.Common.Http;
 using NzbDrone.Core.Blocklisting;
 using NzbDrone.Core.Configuration;
@@ -320,11 +319,9 @@ namespace NzbDrone.Core.Download.Clients.Seedr
 
         protected override void Test(List<ValidationFailure> failures)
         {
-            SeedrUser user = null;
-
             try
             {
-                user = _proxy.GetUser(Settings);
+                _proxy.GetUser(Settings);
             }
             catch (DownloadClientAuthenticationException ex)
             {
@@ -335,11 +332,6 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             {
                 failures.Add(new ValidationFailure("Email", ex.Message));
                 return;
-            }
-
-            if (!user.IsPremium)
-            {
-                failures.Add(new ValidationFailure("Email", _localizationService.GetLocalizedString("DownloadClientSeedrValidationPremiumRequired")));
             }
 
             var folderFailure = TestFolder(Settings.DownloadDirectory, "DownloadDirectory");

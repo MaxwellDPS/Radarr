@@ -132,6 +132,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
         }
 
         private T DeserializeResponse<T>(HttpResponse response)
+            where T : new()
         {
             if (response.Content.IsNullOrWhiteSpace())
             {

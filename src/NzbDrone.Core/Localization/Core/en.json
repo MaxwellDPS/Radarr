@@ -527,7 +527,6 @@
   "DownloadClientSeedrSettingsDeleteFromCloudHelpText": "Remove files from Seedr cloud storage after they have been downloaded locally and imported by {appName}.",
   "DownloadClientSeedrSettingsDownloadDirectory": "Download Directory",
   "DownloadClientSeedrSettingsDownloadDirectoryHelpText": "Local directory where completed files from Seedr will be downloaded for import by {appName}.",
-  "DownloadClientSeedrValidationPremiumRequired": "Seedr API requires a premium account.",
   "DownloadClientSeedrValidationStorageWarning": "Seedr cloud storage is almost full ({usedPercent}% used). Downloads may fail.",
   "DownloadClientSettings": "Download Client Settings",
   "DownloadClientSettingsAddPaused": "Add Paused",
