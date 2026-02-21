@@ -11,8 +11,8 @@ namespace NzbDrone.Core.Download.Clients.Seedr
     public interface ISeedrProxy
     {
         SeedrFolderContents GetFolderContents(long? folderId, SeedrSettings settings);
-        SeedrTransfer AddMagnet(string magnetLink, SeedrSettings settings);
-        SeedrTransfer AddTorrentFile(string filename, byte[] fileContent, SeedrSettings settings);
+        SeedrAddTransferResponse AddMagnet(string magnetLink, SeedrSettings settings);
+        SeedrAddTransferResponse AddTorrentFile(string filename, byte[] fileContent, SeedrSettings settings);
         void DeleteTransfer(long transferId, SeedrSettings settings);
         void DeleteFolder(long folderId, SeedrSettings settings);
         void DeleteFile(long fileId, SeedrSettings settings);
@@ -52,10 +52,32 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             }
             catch (HttpException ex)
             {
-                if (ex.Response?.StatusCode == HttpStatusCode.Forbidden ||
-                    ex.Response?.StatusCode == HttpStatusCode.Unauthorized)
+                if (ex.Response != null)
                 {
-                    throw new DownloadClientAuthenticationException("Failed to authenticate with Seedr.");
+                    var statusCode = (int)ex.Response.StatusCode;
+
+                    if (ex.Response.StatusCode == HttpStatusCode.Forbidden ||
+                        ex.Response.StatusCode == HttpStatusCode.Unauthorized)
+                    {
+                        throw new DownloadClientAuthenticationException("Failed to authenticate with Seedr.");
+                    }
+
+                    if (statusCode == 429)
+                    {
+                        throw new DownloadClientException("Seedr API rate limit exceeded. Please try again later.");
+                    }
+
+                    if (ex.Response.StatusCode == HttpStatusCode.NotFound)
+                    {
+                        throw new DownloadClientException("Seedr API resource not found (404).");
+                    }
+
+                    if (statusCode >= 500)
+                    {
+                        throw new DownloadClientException($"Seedr API server error ({statusCode}). Please try again later.");
+                    }
+
+                    throw new DownloadClientException($"Seedr API request failed with status {statusCode}.");
                 }
 
                 throw new DownloadClientException("Unable to connect to Seedr, please check your settings");
@@ -78,7 +100,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             return DeserializeResponse<SeedrFolderContents>(HandleRequest(request));
         }
 
-        public SeedrTransfer AddMagnet(string magnetLink, SeedrSettings settings)
+        public SeedrAddTransferResponse AddMagnet(string magnetLink, SeedrSettings settings)
         {
             var request = BuildRequest(settings)
                 .Resource("/transfer/magnet")
@@ -86,10 +108,10 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                 .AddFormParameter("magnet", magnetLink)
                 .Build();
 
-            return DeserializeResponse<SeedrTransfer>(HandleRequest(request));
+            return DeserializeResponse<SeedrAddTransferResponse>(HandleRequest(request));
         }
 
-        public SeedrTransfer AddTorrentFile(string filename, byte[] fileContent, SeedrSettings settings)
+        public SeedrAddTransferResponse AddTorrentFile(string filename, byte[] fileContent, SeedrSettings settings)
         {
             var request = BuildRequest(settings)
                 .Resource("/transfer/file")
@@ -97,12 +119,12 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                 .AddFormUpload("file", filename, fileContent, "application/x-bittorrent")
                 .Build();
 
-            return DeserializeResponse<SeedrTransfer>(HandleRequest(request));
+            return DeserializeResponse<SeedrAddTransferResponse>(HandleRequest(request));
         }
 
         public void DeleteTransfer(long transferId, SeedrSettings settings)
         {
-            var request = BuildRequest(settings).Resource($"/transfer/{transferId}").Build();
+            var request = BuildRequest(settings).Resource($"/torrent/{transferId}").Build();
             request.Method = System.Net.Http.HttpMethod.Delete;
 
             HandleRequest(request);
@@ -127,8 +149,12 @@ namespace NzbDrone.Core.Download.Clients.Seedr
         public SeedrUser GetUser(SeedrSettings settings)
         {
             var request = BuildRequest(settings).Resource("/user").Build();
+            var response = HandleRequest(request);
 
-            return DeserializeResponse<SeedrUser>(HandleRequest(request));
+            var userResponse = DeserializeResponse<SeedrUserResponse>(response);
+
+            return userResponse.Account
+                   ?? throw new DownloadClientException("Seedr API returned a user response with no account data");
         }
 
         private T DeserializeResponse<T>(HttpResponse response)
@@ -146,6 +172,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
         {
             var requestBuilder = BuildRequest(settings);
             requestBuilder.AllowAutoRedirect = true;
+            requestBuilder.Headers.Accept = "*/*";
             var request = requestBuilder.Resource($"/file/{fileId}").Build();
             request.RequestTimeout = TimeSpan.FromMinutes(30);
 

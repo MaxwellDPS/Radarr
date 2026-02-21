@@ -2,6 +2,12 @@ using Newtonsoft.Json;
 
 namespace NzbDrone.Core.Download.Clients.Seedr
 {
+    public class SeedrUserResponse
+    {
+        [JsonProperty("account")]
+        public SeedrUser Account { get; set; }
+    }
+
     public class SeedrUser
     {
         [JsonProperty("username")]
