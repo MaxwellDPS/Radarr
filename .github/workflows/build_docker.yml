@@ -20,52 +20,48 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:8.0
+  DOTNET_VERSION: "8.0.x"
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
   TEST_FILTER: "TestCategory!=ManualTest&TestCategory!=WINDOWS&TestCategory!=IntegrationTest&TestCategory!=AutomationTest&FullyQualifiedName!~NewznabCapabilitiesProviderFixture&FullyQualifiedName!~UpgradeMediaFileServiceFixture"
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Check out
-        uses: actions/checkout@v5
-
-      - name: Build in Docker
-        run: |
-          docker run --rm \
-            -v "${{ github.workspace }}:/src" \
-            -w /src \
-            ${{ env.SDK_IMAGE }} \
-            dotnet build src/Radarr.sln -warnaserror /m:1
-
   test:
-    name: Unit Tests
+    name: Build & Test
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Check out
         uses: actions/checkout@v5
 
-      - name: Build and Test in Docker
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj', '**/Directory.*.props') }}
+          restore-keys: nuget-
+
+      - name: Build
+        run: dotnet build src/Radarr.sln -warnaserror
+
+      - name: Test
         run: |
-          docker run --rm \
-            -v "${{ github.workspace }}:/src" \
-            -w /src \
-            ${{ env.SDK_IMAGE }} \
-            bash -c "dotnet build src/Radarr.sln -warnaserror /m:1 && \
-              dotnet test _tests/net8.0/Radarr.Core.Test.dll --filter \"${{ env.TEST_FILTER }}\" && \
-              dotnet test _tests/net8.0/Radarr.Api.Test.dll --filter \"${{ env.TEST_FILTER }}\" && \
-              dotnet test _tests/net8.0/Radarr.Common.Test.dll --filter \"${{ env.TEST_FILTER }}\" && \
-              dotnet test _tests/net8.0/Radarr.Host.Test.dll --filter \"${{ env.TEST_FILTER }}\" && \
-              dotnet test _tests/net8.0/Radarr.Libraries.Test.dll --filter \"${{ env.TEST_FILTER }}\""
+          dotnet test _tests/net8.0/Radarr.Core.Test.dll --filter "${{ env.TEST_FILTER }}" && \
+          dotnet test _tests/net8.0/Radarr.Api.Test.dll --filter "${{ env.TEST_FILTER }}" && \
+          dotnet test _tests/net8.0/Radarr.Common.Test.dll --filter "${{ env.TEST_FILTER }}" && \
+          dotnet test _tests/net8.0/Radarr.Host.Test.dll --filter "${{ env.TEST_FILTER }}" && \
+          dotnet test _tests/net8.0/Radarr.Libraries.Test.dll --filter "${{ env.TEST_FILTER }}"
 
   docker:
     name: Build Docker Image
-    needs: [build, test]
+    needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
