@@ -1,3 +1,4 @@
+using System.Globalization;
 using Newtonsoft.Json;
 
 namespace NzbDrone.Core.Download.Clients.Seedr
@@ -11,7 +12,36 @@ namespace NzbDrone.Core.Download.Clients.Seedr
         public string Name { get; set; }
 
         [JsonProperty("progress")]
-        public int Progress { get; set; }
+        public object RawProgress { get; set; }
+
+        [JsonIgnore]
+        public double Progress
+        {
+            get
+            {
+                if (RawProgress == null)
+                {
+                    return 0;
+                }
+
+                if (RawProgress is double d)
+                {
+                    return d;
+                }
+
+                if (RawProgress is long l)
+                {
+                    return l;
+                }
+
+                if (double.TryParse(RawProgress.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed))
+                {
+                    return parsed;
+                }
+
+                return 0;
+            }
+        }
 
         [JsonProperty("size")]
         public long Size { get; set; }

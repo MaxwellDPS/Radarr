@@ -145,6 +145,39 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                         _downloadCache.Set(infoHash, mapping);
                     }
 
+                    // Estimate RemainingTime from progress rate
+                    TimeSpan? remainingTime = null;
+                    var now = DateTime.UtcNow;
+
+                    if (mapping != null && transfer.Progress > 0 && transfer.Progress < 100)
+                    {
+                        if (mapping.LastProgress > 0 && mapping.LastProgressTime.HasValue && transfer.Progress > mapping.LastProgress)
+                        {
+                            var elapsed = (now - mapping.LastProgressTime.Value).TotalSeconds;
+
+                            if (elapsed > 0)
+                            {
+                                var progressDelta = transfer.Progress - mapping.LastProgress;
+                                var progressPerSecond = progressDelta / elapsed;
+                                var remainingProgress = 100 - transfer.Progress;
+                                var estimatedSeconds = remainingProgress / progressPerSecond;
+
+                                if (estimatedSeconds > 0 && estimatedSeconds < 86400)
+                                {
+                                    remainingTime = TimeSpan.FromSeconds(estimatedSeconds);
+                                }
+                            }
+                        }
+
+                        // Update tracking snapshot when progress changes
+                        if (mapping.LastProgress != transfer.Progress)
+                        {
+                            mapping.LastProgress = transfer.Progress;
+                            mapping.LastProgressTime = now;
+                            _downloadCache.Set(infoHash, mapping);
+                        }
+                    }
+
                     var item = new DownloadClientItem
                     {
                         DownloadClientInfo = DownloadClientItemClientInfo.FromDownloadClient(this, false),
@@ -152,7 +185,9 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                         Title = transfer.Name,
                         TotalSize = transfer.Size,
                         RemainingSize = transfer.Size - (long)(transfer.Size * (transfer.Progress / 100.0)),
+                        RemainingTime = remainingTime,
                         Status = DownloadItemStatus.Downloading,
+                        Message = $"Downloading to Seedr cloud ({transfer.Progress:F1}%)",
                         CanMoveFiles = false,
                         CanBeRemoved = false
                     };
@@ -202,6 +237,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                             Title = folder.Name,
                             TotalSize = folder.Size,
                             RemainingSize = 0,
+                            RemainingTime = TimeSpan.Zero,
                             Status = DownloadItemStatus.Completed,
                             OutputPath = new OsPath(localPath),
                             CanMoveFiles = true,
@@ -227,15 +263,21 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                     {
                         DownloadFolderFromCloud(folder, mapping);
 
+                        var localDir = Path.Combine(Settings.DownloadDirectory, SanitizeFileName(folder.Name));
+                        var bytesOnDisk = GetBytesOnDisk(localDir);
+                        var remainingBytes = Math.Max(0, folder.Size - bytesOnDisk);
+                        var localRemainingTime = EstimateLocalDownloadTime(mapping, bytesOnDisk, folder.Size);
+
                         items.Add(new DownloadClientItem
                         {
                             DownloadClientInfo = DownloadClientItemClientInfo.FromDownloadClient(this, false),
                             DownloadId = mapping.InfoHash,
                             Title = folder.Name,
                             TotalSize = folder.Size,
-                            RemainingSize = folder.Size,
+                            RemainingSize = remainingBytes,
+                            RemainingTime = localRemainingTime,
                             Status = DownloadItemStatus.Downloading,
-                            Message = "Downloading from Seedr cloud",
+                            Message = "Downloading from Seedr cloud to local",
                             CanMoveFiles = false,
                             CanBeRemoved = false
                         });
@@ -284,6 +326,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                             Title = file.Name,
                             TotalSize = file.Size,
                             RemainingSize = 0,
+                            RemainingTime = TimeSpan.Zero,
                             Status = DownloadItemStatus.Completed,
                             OutputPath = new OsPath(localPath),
                             CanMoveFiles = true,
@@ -309,15 +352,20 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                     {
                         DownloadFileFromCloud(file, mapping);
 
+                        var bytesOnDisk = GetFileBytesOnDisk(localPath);
+                        var remainingBytes = Math.Max(0, file.Size - bytesOnDisk);
+                        var localRemainingTime = EstimateLocalDownloadTime(mapping, bytesOnDisk, file.Size);
+
                         items.Add(new DownloadClientItem
                         {
                             DownloadClientInfo = DownloadClientItemClientInfo.FromDownloadClient(this, false),
                             DownloadId = mapping.InfoHash,
                             Title = file.Name,
                             TotalSize = file.Size,
-                            RemainingSize = file.Size,
+                            RemainingSize = remainingBytes,
+                            RemainingTime = localRemainingTime,
                             Status = DownloadItemStatus.Downloading,
-                            Message = "Downloading from Seedr cloud",
+                            Message = "Downloading from Seedr cloud to local",
                             CanMoveFiles = false,
                             CanBeRemoved = false
                         });
@@ -551,6 +599,8 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             }
 
             mapping.LocalDownloadInProgress = true;
+            mapping.LocalDownloadStartTime = DateTime.UtcNow;
+            mapping.LocalTotalBytes = folder.Size;
             _downloadCache.Set(mapping.InfoHash, mapping);
 
             var settings = Settings;
@@ -604,6 +654,8 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             }
 
             mapping.LocalDownloadInProgress = true;
+            mapping.LocalDownloadStartTime = DateTime.UtcNow;
+            mapping.LocalTotalBytes = file.Size;
             _downloadCache.Set(mapping.InfoHash, mapping);
 
             var settings = Settings;
@@ -691,6 +743,88 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             return _diskProvider.FileExists(localPath) && !localPath.EndsWith(".part");
         }
 
+        private long GetBytesOnDisk(string directoryPath)
+        {
+            try
+            {
+                if (!_diskProvider.FolderExists(directoryPath))
+                {
+                    return 0;
+                }
+
+                return _diskProvider.GetFiles(directoryPath, true)
+                    .Sum(f => _diskProvider.GetFileSize(f));
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug(ex, "Failed to calculate bytes on disk for '{0}'", directoryPath);
+                return 0;
+            }
+        }
+
+        private long GetFileBytesOnDisk(string filePath)
+        {
+            try
+            {
+                // Check .part file first (in-progress download), then completed file
+                var partPath = filePath + ".part";
+
+                if (_diskProvider.FileExists(partPath))
+                {
+                    return _diskProvider.GetFileSize(partPath);
+                }
+
+                if (_diskProvider.FileExists(filePath))
+                {
+                    return _diskProvider.GetFileSize(filePath);
+                }
+
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug(ex, "Failed to get file size for '{0}'", filePath);
+                return 0;
+            }
+        }
+
+        private TimeSpan? EstimateLocalDownloadTime(SeedrDownloadMapping mapping, long bytesOnDisk, long totalBytes)
+        {
+            if (totalBytes <= 0 || !mapping.LocalDownloadStartTime.HasValue)
+            {
+                return null;
+            }
+
+            if (bytesOnDisk <= 0)
+            {
+                return null;
+            }
+
+            var elapsed = (DateTime.UtcNow - mapping.LocalDownloadStartTime.Value).TotalSeconds;
+
+            if (elapsed <= 0)
+            {
+                return null;
+            }
+
+            var bytesPerSecond = bytesOnDisk / elapsed;
+
+            if (bytesPerSecond <= 0)
+            {
+                return null;
+            }
+
+            var remainingBytes = totalBytes - bytesOnDisk;
+            var estimatedSeconds = remainingBytes / bytesPerSecond;
+
+            if (estimatedSeconds > 0 && estimatedSeconds < 86400)
+            {
+                return TimeSpan.FromSeconds(estimatedSeconds);
+            }
+
+            return null;
+        }
+
         // R1: Centralized SanitizeFileName helper (ported from Sonarr)
         private static string SanitizeFileName(string name)
         {
@@ -715,6 +849,12 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             public bool LocalDownloadComplete { get; set; }
             public bool LocalDownloadInProgress { get; set; }
             public bool LocalDownloadFailed { get; set; }
+
+            // Progress tracking for ETA estimation
+            public double LastProgress { get; set; }
+            public DateTime? LastProgressTime { get; set; }
+            public DateTime? LocalDownloadStartTime { get; set; }
+            public long LocalTotalBytes { get; set; }
         }
     }
 }

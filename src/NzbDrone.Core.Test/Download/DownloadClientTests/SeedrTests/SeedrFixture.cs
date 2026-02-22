@@ -60,13 +60,13 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.SeedrTests
                   .Returns<string, Dictionary<string, object>>((key, args) => key);
         }
 
-        protected void GivenTransfer(long id, string name, int progress, long size, string hash = null)
+        protected void GivenTransfer(long id, string name, double progress, long size, string hash = null)
         {
             _folderContents.Transfers.Add(new SeedrTransfer
             {
                 Id = id,
                 Name = name,
-                Progress = progress,
+                RawProgress = progress,
                 Size = size,
                 Hash = hash
             });
@@ -220,7 +220,7 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.SeedrTests
             var item = Subject.GetItems().Single();
 
             item.Status.Should().Be(DownloadItemStatus.Downloading);
-            item.Message.Should().Be("Downloading from Seedr cloud");
+            item.Message.Should().Be("Downloading from Seedr cloud to local");
             item.CanMoveFiles.Should().BeFalse();
             item.CanBeRemoved.Should().BeFalse();
         }
@@ -262,7 +262,7 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.SeedrTests
             var item = Subject.GetItems().Single();
 
             item.Status.Should().Be(DownloadItemStatus.Downloading);
-            item.Message.Should().Be("Downloading from Seedr cloud");
+            item.Message.Should().Be("Downloading from Seedr cloud to local");
         }
 
         [Test]
