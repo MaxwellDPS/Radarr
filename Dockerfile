@@ -1,5 +1,5 @@
 # -- Backend build --
-FROM mcr.microsoft.com/dotnet/sdk:8.0.405-alpine AS backend-build
+FROM mcr.microsoft.com/dotnet/sdk:8.0-alpine AS backend-build
 
 ARG TARGETARCH
 
