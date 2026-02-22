@@ -273,6 +273,8 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.SeedrTests
             var items = Subject.GetItems().ToList();
 
             items.Should().BeEmpty();
+
+            ExceptionVerification.ExpectedWarns(1);
         }
 
         [Test]
@@ -283,6 +285,8 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.SeedrTests
             var items = Subject.GetItems().ToList();
 
             items.Should().BeEmpty();
+
+            ExceptionVerification.ExpectedWarns(1);
         }
 
         [Test]
