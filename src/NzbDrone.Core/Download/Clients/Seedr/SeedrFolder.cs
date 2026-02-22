@@ -5,6 +5,12 @@ namespace NzbDrone.Core.Download.Clients.Seedr
 {
     public class SeedrFolderContents
     {
+        [JsonProperty("result")]
+        public object Result { get; set; }
+
+        [JsonProperty("code")]
+        public int? Code { get; set; }
+
         [JsonProperty("id")]
         public long Id { get; set; }
 
@@ -25,6 +31,9 @@ namespace NzbDrone.Core.Download.Clients.Seedr
 
         [JsonProperty("space_max")]
         public long SpaceMax { get; set; }
+
+        [JsonIgnore]
+        public bool IsSuccess => Result == null || (Result is bool b && b);
     }
 
     public class SeedrSubFolder

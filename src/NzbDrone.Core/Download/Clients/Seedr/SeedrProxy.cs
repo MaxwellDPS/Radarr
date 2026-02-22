@@ -97,7 +97,14 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             var resource = folderId.HasValue ? $"/folder/{folderId.Value}" : "/folder";
             var request = BuildRequest(settings).Resource(resource).Build();
 
-            return DeserializeResponse<SeedrFolderContents>(HandleRequest(request));
+            var contents = DeserializeResponse<SeedrFolderContents>(HandleRequest(request));
+
+            if (!contents.IsSuccess)
+            {
+                throw new DownloadClientException($"Seedr API returned error for folder {folderId}: result={contents.Result}, code={contents.Code}");
+            }
+
+            return contents;
         }
 
         public SeedrAddTransferResponse AddMagnet(string magnetLink, SeedrSettings settings)

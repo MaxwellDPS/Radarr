@@ -244,23 +244,16 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                             CanBeRemoved = true
                         });
                     }
-                    else if (mapping.LocalDownloadFailed)
-                    {
-                        items.Add(new DownloadClientItem
-                        {
-                            DownloadClientInfo = DownloadClientItemClientInfo.FromDownloadClient(this, false),
-                            DownloadId = mapping.InfoHash,
-                            Title = folder.Name,
-                            TotalSize = folder.Size,
-                            RemainingSize = folder.Size,
-                            Status = DownloadItemStatus.Warning,
-                            Message = "Failed to download from Seedr cloud. Remove and re-add to retry.",
-                            CanMoveFiles = false,
-                            CanBeRemoved = true
-                        });
-                    }
                     else
                     {
+                        // Reset failed state to allow automatic retry on next poll
+                        if (mapping.LocalDownloadFailed)
+                        {
+                            _logger.Info("Retrying previously failed cloud-to-local download for Seedr folder '{0}'", folder.Name);
+                            mapping.LocalDownloadFailed = false;
+                            _downloadCache.Set(mapping.InfoHash, mapping);
+                        }
+
                         DownloadFolderFromCloud(folder, mapping);
 
                         var localDir = Path.Combine(Settings.DownloadDirectory, SanitizeFileName(folder.Name));
@@ -333,23 +326,16 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                             CanBeRemoved = true
                         });
                     }
-                    else if (mapping.LocalDownloadFailed)
-                    {
-                        items.Add(new DownloadClientItem
-                        {
-                            DownloadClientInfo = DownloadClientItemClientInfo.FromDownloadClient(this, false),
-                            DownloadId = mapping.InfoHash,
-                            Title = file.Name,
-                            TotalSize = file.Size,
-                            RemainingSize = file.Size,
-                            Status = DownloadItemStatus.Warning,
-                            Message = "Failed to download from Seedr cloud. Remove and re-add to retry.",
-                            CanMoveFiles = false,
-                            CanBeRemoved = true
-                        });
-                    }
                     else
                     {
+                        // Reset failed state to allow automatic retry on next poll
+                        if (mapping.LocalDownloadFailed)
+                        {
+                            _logger.Info("Retrying previously failed cloud-to-local download for Seedr file '{0}'", file.Name);
+                            mapping.LocalDownloadFailed = false;
+                            _downloadCache.Set(mapping.InfoHash, mapping);
+                        }
+
                         DownloadFileFromCloud(file, mapping);
 
                         var bytesOnDisk = GetFileBytesOnDisk(localPath);
@@ -615,7 +601,12 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                     var localDir = Path.Combine(settings.DownloadDirectory, SanitizeFileName(folder.Name));
                     _diskProvider.CreateFolder(localDir);
 
-                    DownloadFolderContentsRecursive(folder.Id, localDir, settings);
+                    var filesDownloaded = DownloadFolderContentsRecursive(folder.Id, localDir, settings);
+
+                    if (filesDownloaded == 0)
+                    {
+                        throw new DownloadClientException($"Seedr folder '{folder.Name}' returned no files from API. The folder may still be processing on Seedr's servers.");
+                    }
 
                     var currentMapping = _downloadCache.Find(infoHash);
 
@@ -627,7 +618,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                         _downloadCache.Set(infoHash, currentMapping);
                     }
 
-                    _logger.Info("Completed cloud-to-local download for Seedr folder '{0}'", folder.Name);
+                    _logger.Info("Completed cloud-to-local download for Seedr folder '{0}' ({1} files)", folder.Name, filesDownloaded);
                 }
                 catch (Exception ex)
                 {
@@ -699,10 +690,11 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             });
         }
 
-        // 3.2: Recursive helper for nested folder downloads
-        private void DownloadFolderContentsRecursive(long folderId, string localDir, SeedrSettings settings)
+        // 3.2: Recursive helper for nested folder downloads. Returns number of files downloaded.
+        private int DownloadFolderContentsRecursive(long folderId, string localDir, SeedrSettings settings)
         {
             var folderContents = _proxy.GetFolderContents(folderId, settings);
+            var fileCount = 0;
 
             if (folderContents?.Files != null)
             {
@@ -710,6 +702,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                 {
                     var filePath = Path.Combine(localDir, SanitizeFileName(file.Name));
                     _proxy.DownloadFileToPath(file.Id, filePath, settings);
+                    fileCount++;
                 }
             }
 
@@ -719,9 +712,11 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                 {
                     var subDir = Path.Combine(localDir, SanitizeFileName(subFolder.Name));
                     _diskProvider.CreateFolder(subDir);
-                    DownloadFolderContentsRecursive(subFolder.Id, subDir, settings);
+                    fileCount += DownloadFolderContentsRecursive(subFolder.Id, subDir, settings);
                 }
             }
+
+            return fileCount;
         }
 
         // 3.6: Verify folder has at least one non-.part file
