@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using FluentValidation;
 using NzbDrone.Core.Annotations;
 using NzbDrone.Core.Validation;
@@ -12,6 +13,9 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             RuleFor(c => c.Email).NotEmpty().EmailAddress();
             RuleFor(c => c.Password).NotEmpty();
             RuleFor(c => c.DownloadDirectory).IsValidPath();
+            RuleFor(c => c.InstanceTag).NotEmpty().When(c => c.SharedAccount);
+            RuleFor(c => c.InstanceTag).Matches(@"^[a-zA-Z0-9_-]+$", RegexOptions.None)
+                .When(c => !string.IsNullOrWhiteSpace(c.InstanceTag));
         }
     }
 
@@ -22,6 +26,8 @@ namespace NzbDrone.Core.Download.Clients.Seedr
         public SeedrSettings()
         {
             DeleteFromCloud = true;
+            SharedAccount = true;
+            RedisConnectionString = "redis:6379";
         }
 
         [FieldDefinition(0, Label = "Email", Type = FieldType.Textbox, Privacy = PrivacyLevel.UserName)]
@@ -35,6 +41,15 @@ namespace NzbDrone.Core.Download.Clients.Seedr
 
         [FieldDefinition(3, Label = "DownloadClientSeedrSettingsDeleteFromCloud", Type = FieldType.Checkbox, HelpText = "DownloadClientSeedrSettingsDeleteFromCloudHelpText", Advanced = true)]
         public bool DeleteFromCloud { get; set; }
+
+        [FieldDefinition(4, Label = "DownloadClientSeedrSettingsSharedAccount", Type = FieldType.Checkbox, HelpText = "DownloadClientSeedrSettingsSharedAccountHelpText", Advanced = true)]
+        public bool SharedAccount { get; set; }
+
+        [FieldDefinition(5, Label = "DownloadClientSeedrSettingsInstanceTag", Type = FieldType.Textbox, HelpText = "DownloadClientSeedrSettingsInstanceTagHelpText", Advanced = true)]
+        public string InstanceTag { get; set; }
+
+        [FieldDefinition(6, Label = "DownloadClientSeedrSettingsRedisConnection", Type = FieldType.Textbox, HelpText = "DownloadClientSeedrSettingsRedisConnectionHelpText", Privacy = PrivacyLevel.Password, Advanced = true)]
+        public string RedisConnectionString { get; set; }
 
         public override NzbDroneValidationResult Validate()
         {

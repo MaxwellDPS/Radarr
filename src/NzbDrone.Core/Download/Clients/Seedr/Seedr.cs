@@ -24,11 +24,13 @@ namespace NzbDrone.Core.Download.Clients.Seedr
     {
         private readonly ISeedrProxy _proxy;
         private readonly IDownloadHistoryService _downloadHistoryService;
+        private readonly ISeedrOwnershipService _ownershipService;
         private readonly ICached<SeedrDownloadMapping> _downloadCache;
         private bool _cacheRecovered;
 
         public Seedr(ISeedrProxy proxy,
                      IDownloadHistoryService downloadHistoryService,
+                     ISeedrOwnershipService ownershipService,
                      ICacheManager cacheManager,
                      ITorrentFileInfoReader torrentFileInfoReader,
                      IHttpClient httpClient,
@@ -42,6 +44,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
         {
             _proxy = proxy;
             _downloadHistoryService = downloadHistoryService;
+            _ownershipService = ownershipService;
             _downloadCache = cacheManager.GetCache<SeedrDownloadMapping>(GetType());
         }
 
@@ -80,6 +83,8 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                 Name = transfer.Name
             });
 
+            _ownershipService.ClaimOwnership(hash.ToUpper(), Settings);
+
             return hash;
         }
 
@@ -93,6 +98,8 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                 TransferId = transfer.Id,
                 Name = transfer.Name
             });
+
+            _ownershipService.ClaimOwnership(hash.ToUpper(), Settings);
 
             return hash;
         }
@@ -131,6 +138,19 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                                   cachedMappings.FirstOrDefault(m => m.Name == transfer.Name);
 
                     var infoHash = mapping?.InfoHash ?? transfer.Hash?.ToUpper() ?? $"seedr-{transfer.Id}";
+
+                    // In shared account mode, filter items by ownership
+                    if (Settings.SharedAccount)
+                    {
+                        var isOwned = _ownershipService.IsOwnedByMe(infoHash, Settings);
+
+                        if (isOwned == false)
+                        {
+                            continue;
+                        }
+
+                        // If null (Redis down), fall through to existing cache-based logic
+                    }
 
                     // Update cache with transfer info if we have a hash from the transfer
                     if (mapping == null && transfer.Hash.IsNotNullOrWhiteSpace())
@@ -206,6 +226,12 @@ namespace NzbDrone.Core.Download.Clients.Seedr
 
                     if (mapping == null)
                     {
+                        if (Settings.SharedAccount)
+                        {
+                            _logger.Debug("Seedr folder '{0}' has no cached mapping. Skipping (shared account mode).", folder.Name);
+                            continue;
+                        }
+
                         mapping = TryMatchOrphanedItem(folder.Name);
 
                         if (mapping == null)
@@ -288,6 +314,12 @@ namespace NzbDrone.Core.Download.Clients.Seedr
 
                     if (mapping == null)
                     {
+                        if (Settings.SharedAccount)
+                        {
+                            _logger.Debug("Seedr file '{0}' has no cached mapping. Skipping (shared account mode).", file.Name);
+                            continue;
+                        }
+
                         mapping = TryMatchOrphanedItem(file.Name);
 
                         if (mapping == null)
@@ -367,6 +399,38 @@ namespace NzbDrone.Core.Download.Clients.Seedr
         {
             var mapping = _downloadCache.Find(item.DownloadId);
 
+            if (Settings.SharedAccount)
+            {
+                var isLastOwner = _ownershipService.ReleaseOwnership(item.DownloadId, Settings);
+
+                if (isLastOwner == true)
+                {
+                    DeleteFromCloud(mapping, item.DownloadId);
+                }
+                else if (isLastOwner == false)
+                {
+                    _logger.Info("Skipping cloud deletion for {0} — other instances still own this item.", item.DownloadId);
+                }
+                else
+                {
+                    _logger.Warn("Redis unavailable. Skipping cloud deletion for {0} to prevent conflicts.", item.DownloadId);
+                }
+            }
+            else
+            {
+                DeleteFromCloud(mapping, item.DownloadId);
+            }
+
+            if (deleteData)
+            {
+                DeleteItemData(item);
+            }
+
+            _downloadCache.Remove(item.DownloadId);
+        }
+
+        private void DeleteFromCloud(SeedrDownloadMapping mapping, string downloadId)
+        {
             try
             {
                 if (mapping?.FolderId != null)
@@ -384,15 +448,8 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             }
             catch (DownloadClientException ex)
             {
-                _logger.Warn(ex, "Failed to remove item from Seedr cloud for {0}", item.DownloadId);
+                _logger.Warn(ex, "Failed to delete item from Seedr cloud for {0}", downloadId);
             }
-
-            if (deleteData)
-            {
-                DeleteItemData(item);
-            }
-
-            _downloadCache.Remove(item.DownloadId);
         }
 
         public override DownloadClientInfo GetStatus()
@@ -411,24 +468,26 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             {
                 var mapping = _downloadCache.Find(downloadClientItem.DownloadId);
 
-                try
+                if (Settings.SharedAccount)
                 {
-                    if (mapping?.FolderId != null)
+                    var isLastOwner = _ownershipService.ReleaseOwnership(downloadClientItem.DownloadId, Settings);
+
+                    if (isLastOwner == true)
                     {
-                        _proxy.DeleteFolder(mapping.FolderId.Value, Settings);
+                        DeleteFromCloud(mapping, downloadClientItem.DownloadId);
                     }
-                    else if (mapping?.FileId != null)
+                    else if (isLastOwner == false)
                     {
-                        _proxy.DeleteFile(mapping.FileId.Value, Settings);
+                        _logger.Info("Skipping cloud deletion for {0} — other instances still own this item.", downloadClientItem.DownloadId);
                     }
-                    else if (mapping?.TransferId != null)
+                    else
                     {
-                        _proxy.DeleteTransfer(mapping.TransferId.Value, Settings);
+                        _logger.Warn("Redis unavailable. Skipping cloud deletion for {0} to prevent conflicts.", downloadClientItem.DownloadId);
                     }
                 }
-                catch (DownloadClientException ex)
+                else
                 {
-                    _logger.Warn(ex, "Failed to delete imported item from Seedr cloud for {0}", downloadClientItem.DownloadId);
+                    DeleteFromCloud(mapping, downloadClientItem.DownloadId);
                 }
             }
 
@@ -476,6 +535,29 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             {
                 failures.Add(folderFailure);
             }
+
+            if (Settings.SharedAccount)
+            {
+                if (Settings.RedisConnectionString.IsNotNullOrWhiteSpace())
+                {
+                    var redisError = _ownershipService.TestConnection(Settings);
+
+                    if (redisError != null)
+                    {
+                        failures.Add(new ValidationFailure("RedisConnectionString",
+                            _localizationService.GetLocalizedString("DownloadClientSeedrValidationRedisConnectionFailed",
+                                new Dictionary<string, object> { { "errorMessage", redisError } })));
+                    }
+                }
+                else
+                {
+                    failures.Add(new NzbDroneValidationFailure("RedisConnectionString",
+                        _localizationService.GetLocalizedString("DownloadClientSeedrValidationNoRedisWarning"))
+                    {
+                        IsWarning = true
+                    });
+                }
+            }
         }
 
         private void RecoverCacheFromHistory()
@@ -518,6 +600,12 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                     }
 
                     _downloadCache.Set(mapping.InfoHash, mapping);
+
+                    if (Settings.SharedAccount)
+                    {
+                        _ownershipService.ClaimOwnership(mapping.InfoHash, Settings);
+                    }
+
                     recovered++;
                 }
 
