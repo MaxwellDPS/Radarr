@@ -129,11 +129,18 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                 contents.Files?.Count ?? 0,
                 cachedMappings.Count);
 
+            // Track active transfer names so we skip their folders/files (Seedr may create them before the transfer completes)
+            var activeTransferNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             // Active transfers
             if (contents.Transfers != null)
             {
                 foreach (var transfer in contents.Transfers)
                 {
+                    if (transfer.Name.IsNotNullOrWhiteSpace())
+                    {
+                        activeTransferNames.Add(transfer.Name);
+                    }
                     var mapping = cachedMappings.FirstOrDefault(m => m.TransferId == transfer.Id) ??
                                   cachedMappings.FirstOrDefault(m => m.Name == transfer.Name);
 
@@ -221,6 +228,13 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             {
                 foreach (var folder in contents.Folders)
                 {
+                    // Skip folders that still have an active transfer — Seedr may create the folder before the torrent finishes
+                    if (activeTransferNames.Contains(folder.Name))
+                    {
+                        _logger.Debug("Seedr folder '{0}' has an active transfer still in progress. Skipping folder processing.", folder.Name);
+                        continue;
+                    }
+
                     var mapping = cachedMappings.FirstOrDefault(m => m.FolderId == folder.Id) ??
                                   cachedMappings.FirstOrDefault(m => m.Name == folder.Name);
 
@@ -310,6 +324,13 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             {
                 foreach (var file in contents.Files)
                 {
+                    // Skip files that still have an active transfer
+                    if (activeTransferNames.Contains(file.Name))
+                    {
+                        _logger.Debug("Seedr file '{0}' has an active transfer still in progress. Skipping file processing.", file.Name);
+                        continue;
+                    }
+
                     var mapping = cachedMappings.FirstOrDefault(m => m.FileId == file.Id) ??
                                   cachedMappings.FirstOrDefault(m => m.Name == file.Name);
 
