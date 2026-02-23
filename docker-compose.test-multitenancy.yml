@@ -1,0 +1,68 @@
+## Multi-tenancy test: 2 tenants (Radarr + Sonarr) sharing one Seedr account via Redis
+##
+## Prerequisites: Build backend images first:
+##   docker build --target backend-build -t radarr-backend .                          # from Radarr/
+##   cd ../Sonarr && docker build --target backend-build -t sonarr-backend .          # from Sonarr/
+##
+## Usage:
+##   docker compose -f docker-compose.test-multitenancy.yml up
+##
+## After startup:
+##   Radarr:  http://localhost:7878  (tenant: radarr-4k)
+##   Sonarr:  http://localhost:8989  (tenant: sonarr-tv)
+##   Redis:   localhost:6379
+##
+## Configure each instance's Seedr download client via Settings > Download Clients:
+##   - Email / Password:       your Seedr credentials (same on both)
+##   - Download Directory:      /downloads/radarr  or  /downloads/sonarr
+##   - Delete from Cloud:       checked
+##   - Shared Account:          checked
+##   - Instance Tag:            radarr-4k  or  sonarr-tv
+##   - Redis Connection String: redis:6379
+##
+## Verify with:
+##   docker exec multitenancy-redis redis-cli KEYS "seedr:owners:*"
+##   docker exec multitenancy-redis redis-cli SMEMBERS seedr:owners:<HASH>
+
+services:
+  redis:
+    image: radarr-backend
+    container_name: multitenancy-redis
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache redis > /dev/null 2>&1 && redis-server --protected-mode no --save ''"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  radarr:
+    image: radarr-backend
+    container_name: multitenancy-radarr
+    entrypoint: ["/app/Radarr", "-nobrowser", "-data=/config"]
+    ports:
+      - "7878:7878"
+    volumes:
+      - radarr-config:/config
+      - downloads:/downloads
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  sonarr:
+    image: sonarr-test
+    container_name: multitenancy-sonarr
+    ports:
+      - "8989:8989"
+    volumes:
+      - sonarr-config:/config
+      - downloads:/downloads
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  radarr-config:
+  sonarr-config:
+  downloads:

@@ -31,7 +31,8 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.SeedrTests
                 Email = "test@test.com",
                 Password = "pass",
                 DownloadDirectory = @"/downloads".AsOsAgnostic(),
-                DeleteFromCloud = true
+                DeleteFromCloud = true,
+                SharedAccount = false
             };
 
             _folderContents = new SeedrFolderContents

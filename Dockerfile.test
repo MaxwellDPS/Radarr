@@ -1,0 +1,25 @@
+FROM mcr.microsoft.com/dotnet/sdk:8.0-alpine AS test-build
+WORKDIR /build
+COPY global.json .editorconfig ./
+COPY src/Directory.Build.props src/Directory.Build.targets src/NuGet.config src/
+COPY src/Targets/ src/Targets/
+COPY src/NzbDrone/Radarr.csproj src/NzbDrone/
+COPY src/NzbDrone.Common/Radarr.Common.csproj src/NzbDrone.Common/
+COPY src/NzbDrone.Console/Radarr.Console.csproj src/NzbDrone.Console/
+COPY src/NzbDrone.Core/Radarr.Core.csproj src/NzbDrone.Core/
+COPY src/NzbDrone.Host/Radarr.Host.csproj src/NzbDrone.Host/
+COPY src/NzbDrone.Mono/Radarr.Mono.csproj src/NzbDrone.Mono/
+COPY src/NzbDrone.SignalR/Radarr.SignalR.csproj src/NzbDrone.SignalR/
+COPY src/NzbDrone.Update/Radarr.Update.csproj src/NzbDrone.Update/
+COPY src/NzbDrone.Windows/Radarr.Windows.csproj src/NzbDrone.Windows/
+COPY src/Radarr.Api.V3/Radarr.Api.V3.csproj src/Radarr.Api.V3/
+COPY src/Radarr.Http/Radarr.Http.csproj src/Radarr.Http/
+COPY src/ServiceHelpers/ServiceInstall/ServiceInstall.csproj src/ServiceHelpers/ServiceInstall/
+COPY src/ServiceHelpers/ServiceUninstall/ServiceUninstall.csproj src/ServiceHelpers/ServiceUninstall/
+COPY src/NzbDrone.Test.Common/Radarr.Test.Common.csproj src/NzbDrone.Test.Common/
+COPY src/NzbDrone.Core.Test/Radarr.Core.Test.csproj src/NzbDrone.Core.Test/
+COPY src/NzbDrone.Test.Dummy/Radarr.Test.Dummy.csproj src/NzbDrone.Test.Dummy/
+RUN dotnet restore src/NzbDrone.Core.Test/Radarr.Core.Test.csproj
+COPY Logo/ Logo/
+COPY src/ src/
+RUN dotnet build src/NzbDrone.Core.Test/Radarr.Core.Test.csproj -c Debug --no-restore -p:TreatWarningsAsErrors=false

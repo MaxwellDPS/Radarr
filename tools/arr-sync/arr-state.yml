@@ -1,0 +1,84 @@
+# arr-state.yml — Single source of truth for all *arr service configuration
+#
+# Usage:
+#   python arr_sync.py plan                  # Show what would change
+#   python arr_sync.py apply                 # Apply changes
+#   python arr_sync.py apply --user kvn      # Apply only one user
+#   python arr_sync.py status                # Show current state vs desired
+#   python arr_sync.py import max            # Import existing config into YAML
+
+# Shared services
+prowlarr:
+  url: http://172.20.0.10:9696
+  api_key: ""  # Auto-extracted from container if empty
+  # container: prowlarr  # Uncomment if you want auto-extraction
+
+recyclarr:
+  config_path: /share/plex/app_data/recyclarr
+
+flaresolverr:
+  url: http://172.20.0.11:8191
+
+# Per-user environments
+users:
+  max:
+    seedr:
+      email: max@example.com
+      password: secret
+      download_directory: /downloads
+      delete_from_cloud: true
+
+    radarr:
+      url: http://172.20.0.14:7878
+      api_key: ""  # Auto-extracted from container radarr-max
+      container: radarr-max
+      root_folders:
+        - /movies
+      naming:
+        rename_movies: true
+        standard_movie_format: "{Movie Title} ({Release Year}) [{Quality Full}]"
+        movie_folder_format: "{Movie Title} ({Release Year})"
+      media_management:
+        recycle_bin: ""
+        delete_empty_folders: true
+
+    sonarr:
+      url: http://172.20.0.13:8989
+      api_key: ""
+      container: sonarr-max
+      root_folders:
+        - /tv
+      naming: {}       # Copy from reference or leave default
+      media_management: {}
+
+    overseerr:
+      url: http://172.20.0.15:5055
+
+    # This user is the reference for others
+    is_reference: true
+
+  kvn:
+    reference: max  # Copy quality profiles, custom formats, naming from max
+
+    seedr:
+      email: kvn@example.com
+      password: secret2
+      download_directory: /downloads
+      delete_from_cloud: true
+
+    radarr:
+      url: http://172.20.0.24:7878
+      api_key: ""
+      container: radarr-kvn
+      root_folders:
+        - /Movies
+
+    sonarr:
+      url: http://172.20.0.23:8989
+      api_key: ""
+      container: sonarr-kvn
+      root_folders:
+        - /TV
+
+    overseerr:
+      url: http://172.20.0.25:5056

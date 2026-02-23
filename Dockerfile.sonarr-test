@@ -1,0 +1,8 @@
+FROM sonarr-backend
+WORKDIR /build
+RUN dotnet publish src/NzbDrone.Console/Sonarr.Console.csproj \
+    -c Release -f net10.0 -o /sonarr-app --no-self-contained && \
+    dotnet publish src/NzbDrone.Mono/Sonarr.Mono.csproj \
+    -c Release -f net10.0 -o /sonarr-app-mono --no-self-contained && \
+    cp -rn /sonarr-app-mono/* /sonarr-app/
+ENTRYPOINT ["dotnet", "/sonarr-app/Sonarr.dll", "-nobrowser", "-data=/config"]
