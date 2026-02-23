@@ -26,7 +26,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
         public SeedrSettings()
         {
             DeleteFromCloud = true;
-            SharedAccount = true;
+            SharedAccount = false;
             RedisConnectionString = "redis:6379";
         }
 
