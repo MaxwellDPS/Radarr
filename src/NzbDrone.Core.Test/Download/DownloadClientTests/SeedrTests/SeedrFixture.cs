@@ -81,6 +81,17 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.SeedrTests
                 Name = name,
                 Size = size
             });
+
+            // Mock folder contents for IsSeedrFolderReady check
+            Mocker.GetMock<ISeedrProxy>()
+                  .Setup(s => s.GetFolderContents(id, It.IsAny<SeedrSettings>()))
+                  .Returns(new SeedrFolderContents
+                  {
+                      Files = new List<SeedrFile>
+                      {
+                          new SeedrFile { Id = id * 10, Name = "movie.mkv", Size = size }
+                      }
+                  });
         }
 
         protected void GivenFile(long id, string name, long size, long folderId = 0)
@@ -118,23 +129,32 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.SeedrTests
                   });
         }
 
-        protected void GivenLocalFolderExists(string name)
+        protected void GivenLocalFolderExists(string name, long fileSize = 1000)
         {
+            var filePath = "/downloads/" + name + "/movie.mkv";
+
             Mocker.GetMock<IDiskProvider>()
                   .Setup(s => s.FolderExists(It.Is<string>(p => p.EndsWith(name))))
                   .Returns(true);
 
-            // FolderExistsWithCompletedFiles requires at least one non-.part file
             Mocker.GetMock<IDiskProvider>()
                   .Setup(s => s.GetFiles(It.Is<string>(p => p.EndsWith(name)), true))
-                  .Returns(new[] { "/downloads/" + name + "/movie.mkv" });
+                  .Returns(new[] { filePath });
+
+            Mocker.GetMock<IDiskProvider>()
+                  .Setup(s => s.GetFileSize(filePath))
+                  .Returns(fileSize);
         }
 
-        protected void GivenLocalFileExists(string name)
+        protected void GivenLocalFileExists(string name, long fileSize = 1000)
         {
             Mocker.GetMock<IDiskProvider>()
                   .Setup(s => s.FileExists(It.Is<string>(p => p.EndsWith(name))))
                   .Returns(true);
+
+            Mocker.GetMock<IDiskProvider>()
+                  .Setup(s => s.GetFileSize(It.Is<string>(p => p.EndsWith(name))))
+                  .Returns(fileSize);
         }
 
         [Test]
