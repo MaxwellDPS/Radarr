@@ -443,27 +443,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
         {
             var mapping = _downloadCache.Find(item.DownloadId);
 
-            if (Settings.SharedAccount)
-            {
-                var isLastOwner = _ownershipService.ReleaseOwnership(item.DownloadId, Settings);
-
-                if (isLastOwner == true)
-                {
-                    DeleteFromCloud(mapping, item.DownloadId);
-                }
-                else if (isLastOwner == false)
-                {
-                    _logger.Info("Skipping cloud deletion for {0} — other instances still own this item.", item.DownloadId);
-                }
-                else
-                {
-                    _logger.Warn("Redis unavailable. Skipping cloud deletion for {0} to prevent conflicts.", item.DownloadId);
-                }
-            }
-            else
-            {
-                DeleteFromCloud(mapping, item.DownloadId);
-            }
+            ReleaseAndDeleteFromCloud(mapping, item.DownloadId);
 
             if (deleteData)
             {
@@ -471,6 +451,37 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             }
 
             _downloadCache.Remove(item.DownloadId);
+        }
+
+        private bool IsMultiTenancyConfigured =>
+            Settings.SharedAccount &&
+            Settings.InstanceTag.IsNotNullOrWhiteSpace() &&
+            Settings.RedisConnectionString.IsNotNullOrWhiteSpace();
+
+        private void ReleaseAndDeleteFromCloud(SeedrDownloadMapping mapping, string downloadId)
+        {
+            if (IsMultiTenancyConfigured)
+            {
+                var isLastOwner = _ownershipService.ReleaseOwnership(downloadId, Settings);
+
+                if (isLastOwner == true)
+                {
+                    _logger.Info("Last owner of {0}, deleting from Seedr cloud.", downloadId);
+                    DeleteFromCloud(mapping, downloadId);
+                }
+                else if (isLastOwner == false)
+                {
+                    _logger.Info("Skipping cloud deletion for {0} — other instances still own this item.", downloadId);
+                }
+                else
+                {
+                    _logger.Warn("Redis unavailable. Skipping cloud deletion for {0} to prevent conflicts.", downloadId);
+                }
+            }
+            else
+            {
+                DeleteFromCloud(mapping, downloadId);
+            }
         }
 
         private void DeleteFromCloud(SeedrDownloadMapping mapping, string downloadId)
@@ -488,6 +499,10 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                 else if (mapping?.TransferId != null)
                 {
                     _proxy.DeleteTransfer(mapping.TransferId.Value, Settings);
+                }
+                else
+                {
+                    _logger.Warn("No FolderId, FileId, or TransferId in mapping for {0} — cannot delete from Seedr cloud", downloadId);
                 }
             }
             catch (DownloadClientException ex)
@@ -511,28 +526,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             if (Settings.DeleteFromCloud)
             {
                 var mapping = _downloadCache.Find(downloadClientItem.DownloadId);
-
-                if (Settings.SharedAccount)
-                {
-                    var isLastOwner = _ownershipService.ReleaseOwnership(downloadClientItem.DownloadId, Settings);
-
-                    if (isLastOwner == true)
-                    {
-                        DeleteFromCloud(mapping, downloadClientItem.DownloadId);
-                    }
-                    else if (isLastOwner == false)
-                    {
-                        _logger.Info("Skipping cloud deletion for {0} — other instances still own this item.", downloadClientItem.DownloadId);
-                    }
-                    else
-                    {
-                        _logger.Warn("Redis unavailable. Skipping cloud deletion for {0} to prevent conflicts.", downloadClientItem.DownloadId);
-                    }
-                }
-                else
-                {
-                    DeleteFromCloud(mapping, downloadClientItem.DownloadId);
-                }
+                ReleaseAndDeleteFromCloud(mapping, downloadClientItem.DownloadId);
             }
 
             _downloadCache.Remove(downloadClientItem.DownloadId);
