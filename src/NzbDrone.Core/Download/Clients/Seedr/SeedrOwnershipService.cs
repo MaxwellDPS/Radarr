@@ -16,10 +16,6 @@ namespace NzbDrone.Core.Download.Clients.Seedr
 
     public class SeedrRedisOwnershipService : ISeedrOwnershipService
     {
-        private static readonly ConcurrentDictionary<string, Lazy<ConnectionMultiplexer>> Connections = new ();
-        private static readonly TimeSpan OwnershipTtl = TimeSpan.FromDays(7);
-        private readonly Logger _logger;
-
         // Lua script: atomically remove member, check remaining count, delete key if empty or refresh TTL
         private const string ReleaseScript = @"
 redis.call('SREM', KEYS[1], ARGV[1])
@@ -31,6 +27,10 @@ else
     redis.call('EXPIRE', KEYS[1], ARGV[2])
     return 0
 end";
+
+        private static readonly ConcurrentDictionary<string, Lazy<ConnectionMultiplexer>> Connections = new ();
+        private static readonly TimeSpan OwnershipTtl = TimeSpan.FromDays(7);
+        private readonly Logger _logger;
 
         public SeedrRedisOwnershipService(Logger logger)
         {
