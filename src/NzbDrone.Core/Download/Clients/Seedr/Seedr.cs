@@ -288,9 +288,49 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                     }
                     else
                     {
+                        // Retry failed cloud-to-local download with exponential backoff
+                        if (mapping.LocalDownloadFailed)
+                        {
+                            if (mapping.NextRetryAfter.HasValue && DateTime.UtcNow < mapping.NextRetryAfter.Value)
+                            {
+                                items.Add(new DownloadClientItem
+                                {
+                                    DownloadClientInfo = DownloadClientItemClientInfo.FromDownloadClient(this, false),
+                                    DownloadId = mapping.InfoHash,
+                                    Title = folder.Name,
+                                    TotalSize = folder.Size,
+                                    RemainingSize = folder.Size,
+                                    Status = DownloadItemStatus.Downloading,
+                                    Message = $"Retry scheduled (attempt {mapping.DownloadAttempts})",
+                                    CanMoveFiles = false,
+                                    CanBeRemoved = false
+                                });
+
+                                continue;
+                            }
+
+                            mapping.DownloadAttempts++;
+                            _logger.Info("Retrying cloud-to-local download for '{0}' (attempt {1})", folder.Name, mapping.DownloadAttempts);
+                            mapping.LocalDownloadFailed = false;
+                            _downloadCache.Set(mapping.InfoHash, mapping);
+                        }
+
                         // Verify the folder is fully ready on Seedr's cloud before starting download
                         if (!IsSeedrFolderReady(folder))
                         {
+                            mapping.FolderReadyAttempts++;
+                            _downloadCache.Set(mapping.InfoHash, mapping);
+
+                            if (mapping.FolderReadyAttempts > 20)
+                            {
+                                _logger.Error("Seedr folder '{0}' never became ready after {1} attempts. Marking as failed.", folder.Name, mapping.FolderReadyAttempts);
+                                mapping.LocalDownloadFailed = true;
+                                var backoff = Math.Min(30, (int)Math.Pow(2, mapping.DownloadAttempts));
+                                mapping.NextRetryAfter = DateTime.UtcNow.AddMinutes(backoff);
+                                mapping.FolderReadyAttempts = 0;
+                                _downloadCache.Set(mapping.InfoHash, mapping);
+                            }
+
                             _logger.Debug("Seedr folder '{0}' is still being processed on Seedr's servers (empty or size mismatch). Waiting.", folder.Name);
 
                             items.Add(new DownloadClientItem
@@ -309,13 +349,8 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                             continue;
                         }
 
-                        // Reset failed state to allow automatic retry on next poll
-                        if (mapping.LocalDownloadFailed)
-                        {
-                            _logger.Info("Retrying previously failed cloud-to-local download for Seedr folder '{0}'", folder.Name);
-                            mapping.LocalDownloadFailed = false;
-                            _downloadCache.Set(mapping.InfoHash, mapping);
-                        }
+                        // Reset readiness counter on success
+                        mapping.FolderReadyAttempts = 0;
 
                         DownloadFolderFromCloud(folder, mapping);
 
@@ -404,10 +439,29 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                     }
                     else
                     {
-                        // Reset failed state to allow automatic retry on next poll
+                        // Retry failed cloud-to-local download with exponential backoff
                         if (mapping.LocalDownloadFailed)
                         {
-                            _logger.Info("Retrying previously failed cloud-to-local download for Seedr file '{0}'", file.Name);
+                            if (mapping.NextRetryAfter.HasValue && DateTime.UtcNow < mapping.NextRetryAfter.Value)
+                            {
+                                items.Add(new DownloadClientItem
+                                {
+                                    DownloadClientInfo = DownloadClientItemClientInfo.FromDownloadClient(this, false),
+                                    DownloadId = mapping.InfoHash,
+                                    Title = file.Name,
+                                    TotalSize = file.Size,
+                                    RemainingSize = file.Size,
+                                    Status = DownloadItemStatus.Downloading,
+                                    Message = $"Retry scheduled (attempt {mapping.DownloadAttempts})",
+                                    CanMoveFiles = false,
+                                    CanBeRemoved = false
+                                });
+
+                                continue;
+                            }
+
+                            mapping.DownloadAttempts++;
+                            _logger.Info("Retrying cloud-to-local download for '{0}' (attempt {1})", file.Name, mapping.DownloadAttempts);
                             mapping.LocalDownloadFailed = false;
                             _downloadCache.Set(mapping.InfoHash, mapping);
                         }
@@ -739,14 +793,18 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                         {
                             currentMapping.LocalDownloadInProgress = false;
                             currentMapping.LocalDownloadFailed = true;
+                            var backoffMinutes = Math.Min(30, (int)Math.Pow(2, currentMapping.DownloadAttempts));
+                            currentMapping.NextRetryAfter = DateTime.UtcNow.AddMinutes(backoffMinutes);
                             _downloadCache.Set(infoHash, currentMapping);
-                            _logger.Warn("Partially downloaded Seedr folder '{0}': {1} files succeeded, {2} files failed. Will retry on next poll.", folder.Name, filesDownloaded, filesFailed);
+                            _logger.Warn("Partially downloaded Seedr folder '{0}': {1} files succeeded, {2} files failed. Will retry after {3} minutes.", folder.Name, filesDownloaded, filesFailed, backoffMinutes);
                         }
                         else
                         {
                             currentMapping.LocalDownloadComplete = true;
                             currentMapping.LocalDownloadInProgress = false;
                             currentMapping.LocalDownloadFailed = false;
+                            currentMapping.DownloadAttempts = 0;
+                            currentMapping.NextRetryAfter = null;
                             _downloadCache.Set(infoHash, currentMapping);
                             _logger.Info("Completed cloud-to-local download for Seedr folder '{0}' ({1} files)", folder.Name, filesDownloaded);
                         }
@@ -762,6 +820,8 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                     {
                         currentMapping.LocalDownloadInProgress = false;
                         currentMapping.LocalDownloadFailed = true;
+                        var backoffMinutes = Math.Min(30, (int)Math.Pow(2, currentMapping.DownloadAttempts));
+                        currentMapping.NextRetryAfter = DateTime.UtcNow.AddMinutes(backoffMinutes);
                         _downloadCache.Set(infoHash, currentMapping);
                     }
                 }
@@ -801,6 +861,8 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                         currentMapping.LocalDownloadComplete = true;
                         currentMapping.LocalDownloadInProgress = false;
                         currentMapping.LocalDownloadFailed = false;
+                        currentMapping.DownloadAttempts = 0;
+                        currentMapping.NextRetryAfter = null;
                         _downloadCache.Set(infoHash, currentMapping);
                     }
 
@@ -816,6 +878,8 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                     {
                         currentMapping.LocalDownloadInProgress = false;
                         currentMapping.LocalDownloadFailed = true;
+                        var backoffMinutes = Math.Min(30, (int)Math.Pow(2, currentMapping.DownloadAttempts));
+                        currentMapping.NextRetryAfter = DateTime.UtcNow.AddMinutes(backoffMinutes);
                         _downloadCache.Set(infoHash, currentMapping);
                     }
                 }
@@ -836,6 +900,15 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                     try
                     {
                         var filePath = Path.Combine(localDir, SanitizeFileName(file.Name));
+
+                        // Skip files already downloaded successfully
+                        if (File.Exists(filePath) && new FileInfo(filePath).Length >= (long)(file.Size * 0.95))
+                        {
+                            _logger.Debug("Skipping already-downloaded file '{0}'", file.Name);
+                            downloaded++;
+                            continue;
+                        }
+
                         _proxy.DownloadFileToPath(file.Id, filePath, settings);
                         downloaded++;
                     }
@@ -1064,6 +1137,11 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             public bool LocalDownloadComplete { get; set; }
             public bool LocalDownloadInProgress { get; set; }
             public bool LocalDownloadFailed { get; set; }
+
+            // Retry tracking for exponential backoff
+            public int DownloadAttempts { get; set; }
+            public DateTime? NextRetryAfter { get; set; }
+            public int FolderReadyAttempts { get; set; }
 
             // Progress tracking for ETA estimation
             public double LastProgress { get; set; }

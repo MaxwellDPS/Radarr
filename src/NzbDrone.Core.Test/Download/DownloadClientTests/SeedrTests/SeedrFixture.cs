@@ -662,5 +662,86 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.SeedrTests
 
             ExceptionVerification.ExpectedWarns(1);
         }
+
+        [Test]
+        public void folder_readiness_timeout_should_mark_as_failed_after_max_attempts()
+        {
+            GivenSuccessfulMagnetDownload();
+
+            var remoteMovie = CreateRemoteMovie();
+            remoteMovie.Release.DownloadUrl = "magnet:?xt=urn:btih:CBC2F069FE8BB2F544EAE707D75BCD3DE9DCF951&tr=udp";
+
+            Subject.Download(remoteMovie, CreateIndexer()).Wait();
+
+            _folderContents.Transfers.Clear();
+            _folderContents.Folders.Add(new SeedrSubFolder
+            {
+                Id = 100,
+                Name = _title,
+                Size = 1000
+            });
+
+            // Mock folder contents to return empty (never ready)
+            Mocker.GetMock<ISeedrProxy>()
+                  .Setup(s => s.GetFolderContents(100L, It.IsAny<SeedrSettings>()))
+                  .Returns(new SeedrFolderContents
+                  {
+                      Files = new List<SeedrFile>(),
+                      Folders = new List<SeedrSubFolder>()
+                  });
+
+            // Poll 21 times to exceed the 20-attempt threshold
+            for (var i = 0; i < 21; i++)
+            {
+                var items = Subject.GetItems().ToList();
+                items.Should().HaveCount(1);
+                items[0].Status.Should().Be(DownloadItemStatus.Downloading);
+                items[0].Message.Should().Be("Waiting for Seedr to finish processing");
+            }
+
+            ExceptionVerification.ExpectedErrors(1);
+        }
+
+        [Test]
+        public void folder_readiness_timeout_should_trigger_backoff_on_next_poll()
+        {
+            GivenSuccessfulMagnetDownload();
+
+            var remoteMovie = CreateRemoteMovie();
+            remoteMovie.Release.DownloadUrl = "magnet:?xt=urn:btih:CBC2F069FE8BB2F544EAE707D75BCD3DE9DCF951&tr=udp";
+
+            Subject.Download(remoteMovie, CreateIndexer()).Wait();
+
+            _folderContents.Transfers.Clear();
+            _folderContents.Folders.Add(new SeedrSubFolder
+            {
+                Id = 100,
+                Name = _title,
+                Size = 1000
+            });
+
+            // Mock folder contents to return empty (never ready)
+            Mocker.GetMock<ISeedrProxy>()
+                  .Setup(s => s.GetFolderContents(100L, It.IsAny<SeedrSettings>()))
+                  .Returns(new SeedrFolderContents
+                  {
+                      Files = new List<SeedrFile>(),
+                      Folders = new List<SeedrSubFolder>()
+                  });
+
+            // Poll 21 times to trigger readiness timeout
+            for (var i = 0; i < 21; i++)
+            {
+                Subject.GetItems().ToList();
+            }
+
+            // On next poll, should show retry scheduled (backoff is active)
+            var nextItems = Subject.GetItems().ToList();
+            nextItems.Should().HaveCount(1);
+            nextItems[0].Status.Should().Be(DownloadItemStatus.Downloading);
+            nextItems[0].Message.Should().Contain("Retry scheduled");
+
+            ExceptionVerification.ExpectedErrors(1);
+        }
     }
 }

@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Net;
+using System.Threading;
 using NLog;
 using NzbDrone.Common.Extensions;
 using NzbDrone.Common.Http;
@@ -44,52 +45,65 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             return requestBuilder;
         }
 
-        private HttpResponse HandleRequest(HttpRequest request)
+        private HttpResponse HandleRequest(HttpRequest request, int maxRetries = 0)
         {
-            try
+            for (var attempt = 0; attempt <= maxRetries; attempt++)
             {
-                return _httpClient.Execute(request);
-            }
-            catch (HttpException ex)
-            {
-                if (ex.Response != null)
+                try
                 {
-                    var statusCode = (int)ex.Response.StatusCode;
-
-                    if (ex.Response.StatusCode == HttpStatusCode.Forbidden ||
-                        ex.Response.StatusCode == HttpStatusCode.Unauthorized)
-                    {
-                        throw new DownloadClientAuthenticationException("Failed to authenticate with Seedr.");
-                    }
-
-                    if (statusCode == 429)
-                    {
-                        throw new DownloadClientException("Seedr API rate limit exceeded. Please try again later.");
-                    }
-
-                    if (ex.Response.StatusCode == HttpStatusCode.NotFound)
-                    {
-                        throw new DownloadClientException("Seedr API resource not found (404).");
-                    }
-
-                    if (statusCode >= 500)
-                    {
-                        throw new DownloadClientException($"Seedr API server error ({statusCode}). Please try again later.");
-                    }
-
-                    throw new DownloadClientException($"Seedr API request failed with status {statusCode}.");
+                    return _httpClient.Execute(request);
                 }
+                catch (HttpException ex)
+                {
+                    var statusCode = (int)(ex.Response?.StatusCode ?? 0);
+                    var isTransient = statusCode == 429 || statusCode >= 500 || ex.Response == null;
 
-                throw new DownloadClientException("Unable to connect to Seedr, please check your settings");
+                    if (!isTransient || attempt == maxRetries)
+                    {
+                        if (ex.Response != null)
+                        {
+                            if (ex.Response.StatusCode == HttpStatusCode.Forbidden ||
+                                ex.Response.StatusCode == HttpStatusCode.Unauthorized)
+                            {
+                                throw new DownloadClientAuthenticationException("Failed to authenticate with Seedr.");
+                            }
+
+                            if (statusCode == 429)
+                            {
+                                throw new DownloadClientException("Seedr API rate limit exceeded. Please try again later.");
+                            }
+
+                            if (ex.Response.StatusCode == HttpStatusCode.NotFound)
+                            {
+                                throw new DownloadClientException("Seedr API resource not found (404).");
+                            }
+
+                            if (statusCode >= 500)
+                            {
+                                throw new DownloadClientException($"Seedr API server error ({statusCode}). Please try again later.");
+                            }
+
+                            throw new DownloadClientException($"Seedr API request failed with status {statusCode}.");
+                        }
+
+                        throw new DownloadClientException("Unable to connect to Seedr, please check your settings");
+                    }
+
+                    var delay = (int)Math.Min(30000, 1000 * Math.Pow(2, attempt));
+                    _logger.Debug("Transient error ({0}), retrying in {1}ms (attempt {2}/{3})", statusCode, delay, attempt + 1, maxRetries);
+                    Thread.Sleep(delay);
+                }
+                catch (DownloadClientAuthenticationException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    throw new DownloadClientException("Unable to connect to Seedr, please check your settings");
+                }
             }
-            catch (DownloadClientAuthenticationException)
-            {
-                throw;
-            }
-            catch
-            {
-                throw new DownloadClientException("Unable to connect to Seedr, please check your settings");
-            }
+
+            throw new DownloadClientException("Seedr API request failed after all retry attempts");
         }
 
         public SeedrFolderContents GetFolderContents(long? folderId, SeedrSettings settings)
@@ -190,7 +204,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                 using (var fileStream = new FileStream(filePartPath, FileMode.Create, FileAccess.Write))
                 {
                     request.ResponseStream = fileStream;
-                    HandleRequest(request);
+                    HandleRequest(request, maxRetries: 2);
                 }
 
                 if (File.Exists(filePath))
