@@ -42,13 +42,13 @@ namespace NzbDrone.Core.Download.Clients.Seedr
         [FieldDefinition(3, Label = "DownloadClientSeedrSettingsDeleteFromCloud", Type = FieldType.Checkbox, HelpText = "DownloadClientSeedrSettingsDeleteFromCloudHelpText", Advanced = true)]
         public bool DeleteFromCloud { get; set; }
 
-        [FieldDefinition(4, Label = "DownloadClientSeedrSettingsSharedAccount", Type = FieldType.Checkbox, HelpText = "DownloadClientSeedrSettingsSharedAccountHelpText", Advanced = true)]
+        [FieldDefinition(4, Label = "DownloadClientSeedrSettingsSharedAccount", Type = FieldType.Checkbox, HelpText = "DownloadClientSeedrSettingsSharedAccountHelpText")]
         public bool SharedAccount { get; set; }
 
-        [FieldDefinition(5, Label = "DownloadClientSeedrSettingsInstanceTag", Type = FieldType.Textbox, HelpText = "DownloadClientSeedrSettingsInstanceTagHelpText", Advanced = true)]
+        [FieldDefinition(5, Label = "DownloadClientSeedrSettingsInstanceTag", Type = FieldType.Textbox, HelpText = "DownloadClientSeedrSettingsInstanceTagHelpText")]
         public string InstanceTag { get; set; }
 
-        [FieldDefinition(6, Label = "DownloadClientSeedrSettingsRedisConnection", Type = FieldType.Textbox, HelpText = "DownloadClientSeedrSettingsRedisConnectionHelpText", Privacy = PrivacyLevel.Password, Advanced = true)]
+        [FieldDefinition(6, Label = "DownloadClientSeedrSettingsRedisConnection", Type = FieldType.Textbox, HelpText = "DownloadClientSeedrSettingsRedisConnectionHelpText", Privacy = PrivacyLevel.Password)]
         public string RedisConnectionString { get; set; }
 
         public override NzbDroneValidationResult Validate()
