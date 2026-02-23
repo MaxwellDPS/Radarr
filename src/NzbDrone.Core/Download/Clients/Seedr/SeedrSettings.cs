@@ -27,7 +27,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
         {
             DeleteFromCloud = true;
             SharedAccount = false;
-            RedisConnectionString = "redis:6379";
+            RedisConnectionString = "172.20.0.19:6379";
         }
 
         [FieldDefinition(0, Label = "Email", Type = FieldType.Textbox, Privacy = PrivacyLevel.UserName)]
