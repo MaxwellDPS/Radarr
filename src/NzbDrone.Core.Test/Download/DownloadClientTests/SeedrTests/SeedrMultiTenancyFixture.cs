@@ -528,9 +528,10 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.SeedrTests
         }
 
         [Test]
-        public void Test_should_not_check_redis_when_shared_disabled()
+        public void Test_should_not_check_redis_when_no_connection_string()
         {
             GivenSharedAccountDisabled();
+            GivenNoRedis();
 
             Mocker.GetMock<ISeedrProxy>()
                   .Setup(s => s.GetUser(It.IsAny<SeedrSettings>()))
@@ -550,6 +551,35 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.SeedrTests
 
             Mocker.GetMock<ISeedrOwnershipService>()
                   .Verify(v => v.TestConnection(It.IsAny<SeedrSettings>()), Times.Never());
+        }
+
+        [Test]
+        public void Test_should_check_redis_when_connection_string_set_even_without_shared()
+        {
+            GivenSharedAccountDisabled();
+
+            Mocker.GetMock<ISeedrProxy>()
+                  .Setup(s => s.GetUser(It.IsAny<SeedrSettings>()))
+                  .Returns(new SeedrUser { Email = "test@test.com", SpaceUsed = 100, SpaceMax = 1000 });
+
+            Mocker.GetMock<IDiskProvider>()
+                  .Setup(s => s.FolderExists(It.IsAny<string>()))
+                  .Returns(true);
+
+            Mocker.GetMock<IDiskProvider>()
+                  .Setup(s => s.FolderWritable(It.IsAny<string>()))
+                  .Returns(true);
+
+            Mocker.GetMock<ISeedrOwnershipService>()
+                  .Setup(s => s.TestConnection(It.IsAny<SeedrSettings>()))
+                  .Returns((string)null);
+
+            var result = Subject.Test();
+
+            result.IsValid.Should().BeTrue();
+
+            Mocker.GetMock<ISeedrOwnershipService>()
+                  .Verify(v => v.TestConnection(It.IsAny<SeedrSettings>()), Times.Once());
         }
 
         // === RecoverCacheFromHistory: Claim ownership ===
