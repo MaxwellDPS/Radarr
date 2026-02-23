@@ -537,27 +537,24 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                 failures.Add(folderFailure);
             }
 
-            if (Settings.SharedAccount)
+            if (Settings.RedisConnectionString.IsNotNullOrWhiteSpace())
             {
-                if (Settings.RedisConnectionString.IsNotNullOrWhiteSpace())
-                {
-                    var redisError = _ownershipService.TestConnection(Settings);
+                var redisError = _ownershipService.TestConnection(Settings);
 
-                    if (redisError != null)
-                    {
-                        failures.Add(new ValidationFailure("RedisConnectionString",
-                            _localizationService.GetLocalizedString("DownloadClientSeedrValidationRedisConnectionFailed",
-                                new Dictionary<string, object> { { "errorMessage", redisError } })));
-                    }
-                }
-                else
+                if (redisError != null)
                 {
-                    failures.Add(new NzbDroneValidationFailure("RedisConnectionString",
-                        _localizationService.GetLocalizedString("DownloadClientSeedrValidationNoRedisWarning"))
-                    {
-                        IsWarning = true
-                    });
+                    failures.Add(new ValidationFailure("RedisConnectionString",
+                        _localizationService.GetLocalizedString("DownloadClientSeedrValidationRedisConnectionFailed",
+                            new Dictionary<string, object> { { "errorMessage", redisError } })));
                 }
+            }
+            else if (Settings.SharedAccount)
+            {
+                failures.Add(new NzbDroneValidationFailure("RedisConnectionString",
+                    _localizationService.GetLocalizedString("DownloadClientSeedrValidationNoRedisWarning"))
+                {
+                    IsWarning = true
+                });
             }
         }
 
