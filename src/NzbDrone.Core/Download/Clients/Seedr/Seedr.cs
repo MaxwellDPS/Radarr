@@ -288,6 +288,27 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                     }
                     else
                     {
+                        // Verify the folder is fully ready on Seedr's cloud before starting download
+                        if (!IsSeedrFolderReady(folder))
+                        {
+                            _logger.Debug("Seedr folder '{0}' is still being processed on Seedr's servers (empty or size mismatch). Waiting.", folder.Name);
+
+                            items.Add(new DownloadClientItem
+                            {
+                                DownloadClientInfo = DownloadClientItemClientInfo.FromDownloadClient(this, false),
+                                DownloadId = mapping.InfoHash,
+                                Title = folder.Name,
+                                TotalSize = folder.Size,
+                                RemainingSize = folder.Size,
+                                Status = DownloadItemStatus.Downloading,
+                                Message = "Waiting for Seedr to finish processing",
+                                CanMoveFiles = false,
+                                CanBeRemoved = false
+                            });
+
+                            continue;
+                        }
+
                         // Reset failed state to allow automatic retry on next poll
                         if (mapping.LocalDownloadFailed)
                         {
@@ -845,6 +866,53 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             }
 
             return (downloaded, failed);
+        }
+
+        // Check if a Seedr cloud folder is fully processed and ready to download
+        private bool IsSeedrFolderReady(SeedrSubFolder folder)
+        {
+            try
+            {
+                var folderContents = _proxy.GetFolderContents(folder.Id, Settings);
+
+                if (folderContents == null)
+                {
+                    return false;
+                }
+
+                var fileCount = (folderContents.Files?.Count ?? 0) + (folderContents.Folders?.Count ?? 0);
+
+                if (fileCount == 0)
+                {
+                    return false;
+                }
+
+                // Verify the contents size adds up to the expected folder size
+                long contentsSize = 0;
+
+                if (folderContents.Files != null)
+                {
+                    contentsSize += folderContents.Files.Sum(f => f.Size);
+                }
+
+                if (folderContents.Folders != null)
+                {
+                    contentsSize += folderContents.Folders.Sum(f => f.Size);
+                }
+
+                if (folder.Size > 0 && contentsSize < (long)(folder.Size * 0.95))
+                {
+                    _logger.Debug("Seedr folder '{0}' contents size {1} is less than 95% of expected {2}", folder.Name, contentsSize, folder.Size);
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug(ex, "Failed to verify Seedr folder '{0}' readiness, will retry next poll", folder.Name);
+                return false;
+            }
         }
 
         // Verify local folder has all content by comparing size on disk to expected cloud size
