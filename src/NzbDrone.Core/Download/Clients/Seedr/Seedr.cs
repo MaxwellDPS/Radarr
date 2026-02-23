@@ -141,6 +141,7 @@ namespace NzbDrone.Core.Download.Clients.Seedr
                     {
                         activeTransferNames.Add(transfer.Name);
                     }
+
                     var mapping = cachedMappings.FirstOrDefault(m => m.TransferId == transfer.Id) ??
                                   cachedMappings.FirstOrDefault(m => m.Name == transfer.Name);
 
