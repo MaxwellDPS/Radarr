@@ -264,9 +264,9 @@ namespace NzbDrone.Core.Download.Clients.Seedr
 
                     var localPath = Path.Combine(Settings.DownloadDirectory, SanitizeFileName(folder.Name));
 
-                    // 3.6: Verify folder contains non-.part files before marking complete
+                    // Verify folder is fully downloaded by comparing local size to cloud size
                     // Don't falsely mark as complete if a previous download failed partway through
-                    if (mapping.LocalDownloadComplete || (!mapping.LocalDownloadInProgress && !mapping.LocalDownloadFailed && FolderExistsWithCompletedFiles(localPath)))
+                    if (mapping.LocalDownloadComplete || (!mapping.LocalDownloadInProgress && !mapping.LocalDownloadFailed && FolderDownloadComplete(localPath, folder.Size)))
                     {
                         mapping.LocalDownloadComplete = true;
                         mapping.LocalDownloadFailed = false;
@@ -360,8 +360,8 @@ namespace NzbDrone.Core.Download.Clients.Seedr
 
                     var localPath = Path.Combine(Settings.DownloadDirectory, SanitizeFileName(file.Name));
 
-                    // 3.6: Check file exists and is not a .part file
-                    if (mapping.LocalDownloadComplete || (!mapping.LocalDownloadInProgress && !mapping.LocalDownloadFailed && FileExistsCompleted(localPath)))
+                    // Verify file is fully downloaded by comparing local size to cloud size
+                    if (mapping.LocalDownloadComplete || (!mapping.LocalDownloadInProgress && !mapping.LocalDownloadFailed && FileDownloadComplete(localPath, file.Size)))
                     {
                         mapping.LocalDownloadComplete = true;
                         mapping.LocalDownloadFailed = false;
@@ -847,8 +847,8 @@ namespace NzbDrone.Core.Download.Clients.Seedr
             return (downloaded, failed);
         }
 
-        // 3.6: Verify folder has at least one non-.part file
-        private bool FolderExistsWithCompletedFiles(string localPath)
+        // Verify local folder has all content by comparing size on disk to expected cloud size
+        private bool FolderDownloadComplete(string localPath, long expectedSize)
         {
             if (!_diskProvider.FolderExists(localPath))
             {
@@ -857,13 +857,43 @@ namespace NzbDrone.Core.Download.Clients.Seedr
 
             var files = _diskProvider.GetFiles(localPath, true);
 
-            return files.Any(f => !f.EndsWith(".part"));
+            if (!files.Any(f => !f.EndsWith(".part")))
+            {
+                return false;
+            }
+
+            if (files.Any(f => f.EndsWith(".part")))
+            {
+                return false;
+            }
+
+            if (expectedSize <= 0)
+            {
+                return true;
+            }
+
+            var bytesOnDisk = GetBytesOnDisk(localPath);
+
+            // Require at least 95% of expected size to account for minor filesystem differences
+            return bytesOnDisk >= (long)(expectedSize * 0.95);
         }
 
-        // 3.6: Verify file exists and is not a .part file
-        private bool FileExistsCompleted(string localPath)
+        // Verify single file is fully downloaded by comparing size
+        private bool FileDownloadComplete(string localPath, long expectedSize)
         {
-            return _diskProvider.FileExists(localPath) && !localPath.EndsWith(".part");
+            if (!_diskProvider.FileExists(localPath) || localPath.EndsWith(".part"))
+            {
+                return false;
+            }
+
+            if (expectedSize <= 0)
+            {
+                return true;
+            }
+
+            var bytesOnDisk = GetFileBytesOnDisk(localPath);
+
+            return bytesOnDisk >= (long)(expectedSize * 0.95);
         }
 
         private long GetBytesOnDisk(string directoryPath)
